@@ -2,8 +2,8 @@ package browser
 
 import (
 	"context"
-	"os/exec"
 	"fmt"
+	"os/exec"
 )
 
 // Browser represents a browser instance interface

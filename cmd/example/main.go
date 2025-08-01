@@ -87,17 +87,17 @@ func testTurnstile(ctx context.Context, page browser.Page) {
 	// Navigate to a page that might have Turnstile (for testing)
 	// Note: This is just an example - replace with actual test URL
 	fmt.Println("  - Navigating to Turnstile test page...")
-	
+
 	// Create Turnstile solver
 	solver := turnstile.NewSolver(page, ctx)
-	
+
 	// Start the solver
 	if err := solver.Start(); err != nil {
 		log.Printf("Failed to start Turnstile solver: %v", err)
 		return
 	}
 	defer solver.Stop()
-	
+
 	// Wait for potential solution
 	fmt.Println("  - Waiting for Turnstile solution...")
 	if err := solver.WaitForSolution(10 * time.Second); err != nil {
@@ -110,20 +110,20 @@ func testTurnstile(ctx context.Context, page browser.Page) {
 // testRealisticClick demonstrates realistic mouse movement
 func testRealisticClick(controller *page.Controller) {
 	fmt.Println("  - Performing realistic click...")
-	
+
 	// Click at coordinates (100, 100) with realistic mouse movement
 	if err := controller.RealClick(100, 100); err != nil {
 		log.Printf("Failed to perform realistic click: %v", err)
 		return
 	}
-	
+
 	fmt.Println("  - Realistic click completed")
 }
 
 // testStealthFeatures tests anti-detection features
 func testStealthFeatures(page browser.Page) {
 	fmt.Println("  - Testing stealth features...")
-	
+
 	// Test webdriver property hiding
 	script := `
 		return {
@@ -133,15 +133,15 @@ func testStealthFeatures(page browser.Page) {
 			chrome: typeof window.chrome !== 'undefined'
 		};
 	`
-	
+
 	result, err := page.Evaluate(script)
 	if err != nil {
 		log.Printf("Failed to evaluate stealth script: %v", err)
 		return
 	}
-	
+
 	fmt.Printf("  - Stealth test results: %+v\n", result)
-	
+
 	// Test MouseEvent coordinates
 	mouseScript := `
 		const event = new MouseEvent('click', {
@@ -155,13 +155,13 @@ func testStealthFeatures(page browser.Page) {
 			screenY: event.screenY
 		};
 	`
-	
+
 	mouseResult, err := page.Evaluate(mouseScript)
 	if err != nil {
 		log.Printf("Failed to evaluate mouse script: %v", err)
 		return
 	}
-	
+
 	fmt.Printf("  - Mouse event test: %+v\n", mouseResult)
 }
 
@@ -170,7 +170,7 @@ func testStealthFeatures(page browser.Page) {
 // ExampleWithProxy demonstrates using a proxy
 func ExampleWithProxy() {
 	ctx := context.Background()
-	
+
 	opts := &browser.ConnectOptions{
 		Headless: false,
 		Proxy: &browser.ProxyConfig{
@@ -180,56 +180,56 @@ func ExampleWithProxy() {
 			Password: "pass",
 		},
 	}
-	
+
 	instance, err := browser.Connect(ctx, opts)
 	if err != nil {
 		log.Fatalf("Failed to connect with proxy: %v", err)
 	}
 	defer instance.Close()
-	
+
 	// Use the browser with proxy...
 }
 
 // ExampleHeadless demonstrates headless mode
 func ExampleHeadless() {
 	ctx := context.Background()
-	
+
 	opts := &browser.ConnectOptions{
 		Headless: true, // or "new" for new headless mode
 	}
-	
+
 	instance, err := browser.Connect(ctx, opts)
 	if err != nil {
 		log.Fatalf("Failed to connect in headless mode: %v", err)
 	}
 	defer instance.Close()
-	
+
 	// Take a screenshot
 	screenshot, err := instance.Page().Screenshot()
 	if err != nil {
 		log.Printf("Failed to take screenshot: %v", err)
 		return
 	}
-	
+
 	fmt.Printf("Screenshot taken: %d bytes\n", len(screenshot))
 }
 
 // ExampleCustomChrome demonstrates using custom Chrome path
 func ExampleCustomChrome() {
 	ctx := context.Background()
-	
+
 	opts := &browser.ConnectOptions{
 		CustomConfig: map[string]interface{}{
-			"chromePath": "/path/to/custom/chrome",
+			"chromePath":  "/path/to/custom/chrome",
 			"userDataDir": "/path/to/custom/userdata",
 		},
 	}
-	
+
 	instance, err := browser.Connect(ctx, opts)
 	if err != nil {
 		log.Fatalf("Failed to connect with custom Chrome: %v", err)
 	}
 	defer instance.Close()
-	
+
 	// Use custom Chrome instance...
 }

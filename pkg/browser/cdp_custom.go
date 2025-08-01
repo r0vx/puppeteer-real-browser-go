@@ -420,7 +420,7 @@ func CreateCustomCDPConnector() *CustomCDPConnector {
 // Connect establishes a connection using custom CDP client
 func (ccc *CustomCDPConnector) Connect(ctx context.Context, chrome *ChromeProcess, opts *ConnectOptions) (Page, error) {
 	debugURL := fmt.Sprintf("http://localhost:%d", chrome.Port)
-	
+
 	client, err := NewCustomCDPClient(debugURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create custom CDP client: %w", err)
@@ -456,17 +456,17 @@ func (p *CustomCDPPage) initialize() error {
 	if err := p.client.EnablePageDomain(); err != nil {
 		return fmt.Errorf("failed to enable Page domain: %w", err)
 	}
-	
+
 	if err := p.client.EnableDOMDomain(); err != nil {
 		return fmt.Errorf("failed to enable DOM domain: %w", err)
 	}
-	
+
 	// CRITICAL: Inject stealth script on new document WITHOUT Runtime.Enable
 	script := GetAdvancedStealthScript()
 	_, err := p.client.sendCommand("Page.addScriptToEvaluateOnNewDocument", map[string]interface{}{
 		"source": script,
 	})
-	
+
 	return err
 }
 
@@ -501,14 +501,14 @@ func (p *CustomCDPPage) WaitForSelector(selector string) error {
 		if err != nil {
 			continue
 		}
-		
+
 		if found, ok := result.(bool); ok && found {
 			return nil
 		}
-		
+
 		time.Sleep(500 * time.Millisecond)
 	}
-	
+
 	return fmt.Errorf("element with selector '%s' not found", selector)
 }
 
@@ -533,11 +533,11 @@ func (p *CustomCDPPage) GetTitle() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	
+
 	if title, ok := result.(string); ok {
 		return title, nil
 	}
-	
+
 	return "", fmt.Errorf("failed to get title")
 }
 
@@ -547,11 +547,11 @@ func (p *CustomCDPPage) GetURL() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	
+
 	if url, ok := result.(string); ok {
 		return url, nil
 	}
-	
+
 	return "", fmt.Errorf("failed to get URL")
 }
 

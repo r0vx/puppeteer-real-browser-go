@@ -36,10 +36,10 @@ func DefaultChromeFlags() []string {
 		"--enable-blink-features=IdleDetection",
 		"--export-tagged-pdf",
 		"--mute-audio",
-		
+
 		// CRITICAL ANTI-DETECTION FLAGS - These are absolutely essential!
-		"--exclude-switches=enable-automation",  // Exclude the automation switch
-		"--disable-infobars", // Try to disable infobars (may not work in newer Chrome)
+		"--exclude-switches=enable-automation", // Exclude the automation switch
+		"--disable-infobars",                   // Try to disable infobars (may not work in newer Chrome)
 	}
 
 	// 关键修改：添加AutomationControlled到disable-features
@@ -49,7 +49,7 @@ func DefaultChromeFlags() []string {
 			break
 		}
 	}
-	
+
 	// 添加关键的反自动化检测标志
 	flags = append(flags, "--disable-blink-features=AutomationControlled")
 

@@ -17,7 +17,7 @@ func main() {
 
 	opts := &browser.ConnectOptions{
 		Headless:     false,
-		UseCustomCDP: true,  // 使用自定义 CDP 客户端，可能避免双窗口问题
+		UseCustomCDP: true, // 使用自定义 CDP 客户端，可能避免双窗口问题
 		Turnstile:    true,
 		Args: []string{
 			"--start-maximized",

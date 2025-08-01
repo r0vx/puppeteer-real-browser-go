@@ -7,11 +7,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/chromedp/chromedp"
-	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/cdproto/dom"
-	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/cdproto/fetch"
+	"github.com/chromedp/cdproto/network"
+	"github.com/chromedp/cdproto/page"
+	"github.com/chromedp/chromedp"
 )
 
 // CDPConnector handles Chrome DevTools Protocol connections
@@ -53,14 +53,14 @@ func (cc *CDPConnector) Connect(ctx context.Context, chrome *ChromeProcess, opts
 
 // CDPPage implements the Page interface using chromedp
 type CDPPage struct {
-	ctx            context.Context
-	cancel         context.CancelFunc
-	allocCtx       context.Context
-	allocCancel    context.CancelFunc
-	chrome         *ChromeProcess
-	opts           *ConnectOptions
-	initialized    bool
-	requestHandler RequestHandler
+	ctx              context.Context
+	cancel           context.CancelFunc
+	allocCtx         context.Context
+	allocCancel      context.CancelFunc
+	chrome           *ChromeProcess
+	opts             *ConnectOptions
+	initialized      bool
+	requestHandler   RequestHandler
 	interceptEnabled bool
 }
 
@@ -68,7 +68,7 @@ type CDPPage struct {
 func (p *CDPPage) initialize() error {
 	// CRITICAL: Completely avoid Runtime.Enable to prevent Cloudflare detection
 	// This is the core issue that was causing detection
-	
+
 	return chromedp.Run(p.ctx,
 		// Enable ONLY essential domains (NOT Runtime domain!)
 		chromedp.ActionFunc(func(ctx context.Context) error {
@@ -112,7 +112,6 @@ func (p *CDPPage) Click(x, y float64) error {
 	return chromedp.Run(p.ctx, chromedp.MouseClickXY(x, y))
 }
 
-
 // Evaluate executes JavaScript using standard chromedp but with anti-detection Chrome flags
 func (p *CDPPage) Evaluate(script string) (interface{}, error) {
 	// SIMPLIFIED APPROACH: Since our Chrome flags already handle most anti-detection,
@@ -127,7 +126,7 @@ func (p *CDPPage) evaluateViaDOM(script string) (interface{}, error) {
 	// For immediate evaluation, we'll use a different strategy
 	// Create a data attribute on the body to store results
 	resultId := fmt.Sprintf("eval-result-%d", time.Now().UnixNano())
-	
+
 	// Wrap the script to store result in a data attribute
 	wrappedScript := fmt.Sprintf(`
 		try {
@@ -137,7 +136,7 @@ func (p *CDPPage) evaluateViaDOM(script string) (interface{}, error) {
 			document.body.setAttribute('data-%s', JSON.stringify({error: e.message}));
 		}
 	`, script, resultId, resultId)
-	
+
 	// Execute via Page.addScriptToEvaluateOnNewDocument and reload
 	if err := chromedp.Run(p.ctx, chromedp.ActionFunc(func(ctx context.Context) error {
 		_, err := page.AddScriptToEvaluateOnNewDocument(wrappedScript).Do(ctx)
@@ -145,15 +144,15 @@ func (p *CDPPage) evaluateViaDOM(script string) (interface{}, error) {
 	})); err != nil {
 		// If this fails, return a placeholder indicating we avoided Runtime.Enable
 		return map[string]interface{}{
-			"note": "Evaluation attempted without Runtime.Enable",
+			"note":   "Evaluation attempted without Runtime.Enable",
 			"script": script,
 		}, nil
 	}
-	
+
 	// For now, return a success indicator since the actual evaluation
 	// happens on next page load/navigation
 	return map[string]interface{}{
-		"note": "Script queued for next navigation - Runtime.Enable avoided",
+		"note":   "Script queued for next navigation - Runtime.Enable avoided",
 		"script": script,
 	}, nil
 }
@@ -304,7 +303,7 @@ func (p *CDPPage) setupAdditionalStealth() chromedp.Action {
 // SetRequestInterception enables or disables request interception
 func (p *CDPPage) SetRequestInterception(enabled bool) error {
 	p.interceptEnabled = enabled
-	
+
 	if enabled {
 		// Enable both Network and Fetch domains for comprehensive request interception
 		return chromedp.Run(p.ctx, chromedp.ActionFunc(func(ctx context.Context) error {
@@ -312,7 +311,7 @@ func (p *CDPPage) SetRequestInterception(enabled bool) error {
 			if err := network.Enable().Do(ctx); err != nil {
 				return fmt.Errorf("failed to enable Network domain: %w", err)
 			}
-			
+
 			// Enable fetch domain with request patterns - intercept everything
 			patterns := []*fetch.RequestPattern{{
 				URLPattern: "*",
@@ -320,7 +319,7 @@ func (p *CDPPage) SetRequestInterception(enabled bool) error {
 			if err := fetch.Enable().WithHandleAuthRequests(false).WithPatterns(patterns).Do(ctx); err != nil {
 				return fmt.Errorf("failed to enable Fetch domain: %w", err)
 			}
-			
+
 			// Set up request interception listener
 			chromedp.ListenTarget(ctx, func(ev interface{}) {
 				switch e := ev.(type) {
@@ -336,17 +335,17 @@ func (p *CDPPage) SetRequestInterception(enabled bool) error {
 								ResourceType: string(e.ResourceType),
 								RequestID:    string(e.RequestID),
 							}
-							
+
 							// Convert headers
 							for name, value := range e.Request.Headers {
 								if str, ok := value.(string); ok {
 									req.Headers[name] = str
 								}
 							}
-							
+
 							// Set page context for request operations
 							req.setPageContext(p)
-							
+
 							// Call handler
 							if err := p.requestHandler(req); err != nil {
 								// If handler fails, continue the request
@@ -359,7 +358,7 @@ func (p *CDPPage) SetRequestInterception(enabled bool) error {
 					}()
 				}
 			})
-			
+
 			return nil
 		}))
 	} else {
@@ -394,7 +393,7 @@ func (p *CDPPage) respondToRequest(requestID string, response *RequestResponse) 
 				Value: value,
 			})
 		}
-		
+
 		// Ensure we have content-type header
 		hasContentType := false
 		for _, header := range headers {
@@ -412,24 +411,24 @@ func (p *CDPPage) respondToRequest(requestID string, response *RequestResponse) 
 
 		// Use FulfillRequest with proper base64 encoding for body
 		cmd := fetch.FulfillRequest(fetch.RequestID(requestID), int64(response.Status))
-		
+
 		if len(headers) > 0 {
 			cmd = cmd.WithResponseHeaders(headers)
 		}
-		
+
 		if response.Body != "" {
 			// Fetch.FulfillRequest expects body as base64 encoded string
 			bodyBase64 := base64.StdEncoding.EncodeToString([]byte(response.Body))
 			cmd = cmd.WithBody(bodyBase64)
 		}
-		
+
 		err := cmd.Do(ctx)
 		if err != nil {
 			// Log error but don't return it immediately, try to continue the request instead
 			fmt.Printf("Failed to fulfill request: %v, continuing request instead\n", err)
 			return fetch.ContinueRequest(fetch.RequestID(requestID)).Do(ctx)
 		}
-		
+
 		return nil
 	}))
 }

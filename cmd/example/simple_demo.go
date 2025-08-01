@@ -76,7 +76,7 @@ func main() {
 	fmt.Println("  2. Go to Console tab")
 	fmt.Println("  3. Type: navigator.webdriver")
 	fmt.Println("  4. Should return: undefined (not true)")
-	
+
 	fmt.Println("\n⏳ Keeping browser open for 15 seconds for manual inspection...")
 	time.Sleep(15 * time.Second)
 

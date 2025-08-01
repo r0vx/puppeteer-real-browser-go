@@ -47,7 +47,7 @@ func IsPortAvailable(port int) bool {
 // GetChromeExecutablePath returns the path to Chrome executable
 func GetChromeExecutablePath() (string, error) {
 	var paths []string
-	
+
 	switch runtime.GOOS {
 	case "darwin":
 		paths = []string{
@@ -69,27 +69,27 @@ func GetChromeExecutablePath() (string, error) {
 			"C:\\Users\\" + os.Getenv("USERNAME") + "\\AppData\\Local\\Google\\Chrome\\Application\\chrome.exe",
 		}
 	}
-	
+
 	for _, path := range paths {
 		if _, err := os.Stat(path); err == nil {
 			return path, nil
 		}
 	}
-	
+
 	return "", fmt.Errorf("Chrome executable not found")
 }
 
 // WaitWithTimeout waits for a condition with timeout
 func WaitWithTimeout(condition func() bool, timeout time.Duration, interval time.Duration) error {
 	deadline := time.Now().Add(timeout)
-	
+
 	for time.Now().Before(deadline) {
 		if condition() {
 			return nil
 		}
 		time.Sleep(interval)
 	}
-	
+
 	return fmt.Errorf("timeout waiting for condition")
 }
 
@@ -112,10 +112,10 @@ func IsWindows() bool {
 func GetUserDataDir() (string, error) {
 	tmpDir := os.TempDir()
 	userDataDir := fmt.Sprintf("%s/puppeteer-real-browser-go-%d", tmpDir, time.Now().UnixNano())
-	
+
 	if err := os.MkdirAll(userDataDir, 0755); err != nil {
 		return "", fmt.Errorf("failed to create user data directory: %w", err)
 	}
-	
+
 	return userDataDir, nil
 }

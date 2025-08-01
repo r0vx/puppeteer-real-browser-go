@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/chromedp/chromedp"
 	"github.com/chromedp/cdproto/runtime"
+	"github.com/chromedp/chromedp"
 )
 
 // RebrowserPatches implements the core rebrowser-patches anti-detection strategies
@@ -60,7 +60,7 @@ func GetSimpleStealthScript() string {
 func (rp *RebrowserPatches) AddBindingMethod() error {
 	// Create a unique binding name
 	bindingName := fmt.Sprintf("__rebrowser_binding_%d", time.Now().UnixNano())
-	
+
 	return chromedp.Run(rp.ctx,
 		chromedp.ActionFunc(func(ctx context.Context) error {
 			// Add binding to get execution context
@@ -68,10 +68,10 @@ func (rp *RebrowserPatches) AddBindingMethod() error {
 			if err != nil {
 				return err
 			}
-			
+
 			// Set a default execution context ID
 			rp.executionContext = 1 // Default main world context
-			
+
 			return nil
 		}),
 	)
@@ -97,7 +97,7 @@ func (rp *RebrowserPatches) QuickEnableDisable() error {
 			if err := runtime.Enable().Do(ctx); err != nil {
 				return err
 			}
-			
+
 			// Immediate disable to minimize exposure
 			return runtime.Disable().Do(ctx)
 		}),
@@ -112,7 +112,7 @@ func (rp *RebrowserPatches) EvaluateWithBinding(script string) (interface{}, err
 			return nil, err
 		}
 	}
-	
+
 	var resultObj *runtime.RemoteObject
 	var exception *runtime.ExceptionDetails
 	err := chromedp.Run(rp.ctx,
@@ -128,15 +128,15 @@ func (rp *RebrowserPatches) EvaluateWithBinding(script string) (interface{}, err
 			return err
 		}),
 	)
-	
+
 	if err != nil {
 		return nil, err
 	}
-	
+
 	if exception != nil {
 		return nil, fmt.Errorf("evaluation error: %s", exception.Text)
 	}
-	
+
 	// Parse the result
 	var value interface{}
 	if resultObj.Value != nil {
@@ -144,7 +144,7 @@ func (rp *RebrowserPatches) EvaluateWithBinding(script string) (interface{}, err
 			return string(resultObj.Value), nil
 		}
 	}
-	
+
 	return value, nil
 }
 
@@ -155,14 +155,14 @@ func (rp *RebrowserPatches) EvaluateInIsolatedWorld(script string) (interface{},
 			return nil, err
 		}
 	}
-	
+
 	return rp.EvaluateWithBinding(script)
 }
 
 // InjectMinimalStealth injects only the essential stealth script
 func (rp *RebrowserPatches) InjectMinimalStealth() error {
 	script := GetSimpleStealthScript()
-	
+
 	return chromedp.Run(rp.ctx,
 		chromedp.ActionFunc(func(ctx context.Context) error {
 			// Use evaluateOnNewDocument (like original)
@@ -182,20 +182,20 @@ func (rp *RebrowserPatches) SafeEvaluate(script string) (interface{}, error) {
 	if result, err := rp.EvaluateWithBinding(script); err == nil {
 		return result, nil
 	}
-	
+
 	// Fallback to isolated world
 	if result, err := rp.EvaluateInIsolatedWorld(script); err == nil {
 		return result, nil
 	}
-	
+
 	// Last resort: quick enable/disable
 	if err := rp.QuickEnableDisable(); err != nil {
 		return nil, err
 	}
-	
+
 	// Return placeholder to indicate we avoided detection
 	return map[string]interface{}{
-		"note": "Evaluation completed with rebrowser-patches strategy",
+		"note":   "Evaluation completed with rebrowser-patches strategy",
 		"script": script,
 	}, nil
 }

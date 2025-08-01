@@ -3,7 +3,7 @@ package browser
 import (
 	"context"
 	"fmt"
-	
+
 	"github.com/chromedp/chromedp"
 )
 
@@ -116,7 +116,7 @@ func (bi *BrowserInstance) CreateBrowserContext(opts *BrowserContextOptions) (*B
 		chrome:      bi.chrome,
 		opts:        nil, // Don't assume page type - will be set when needed
 	}
-	
+
 	// Try to get options from the page if it's a CDPPage
 	if cdpPage, ok := bi.page.(*CDPPage); ok {
 		browserCtx.opts = cdpPage.opts

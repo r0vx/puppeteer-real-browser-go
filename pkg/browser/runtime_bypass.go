@@ -7,18 +7,18 @@ import (
 	"sync"
 	"time"
 
-	"github.com/chromedp/chromedp"
 	"github.com/chromedp/cdproto/runtime"
+	"github.com/chromedp/chromedp"
 )
 
 // RuntimeBypass implements the core rebrowser-patches Runtime.Enable bypass
 // This is the CRITICAL component for avoiding Cloudflare detection
 type RuntimeBypass struct {
-	ctx             context.Context
-	executionCtxID  runtime.ExecutionContextID
-	bindingName     string
-	runtimeEnabled  bool
-	mutex           sync.RWMutex
+	ctx            context.Context
+	executionCtxID runtime.ExecutionContextID
+	bindingName    string
+	runtimeEnabled bool
+	mutex          sync.RWMutex
 }
 
 // NewRuntimeBypass creates a new Runtime.Enable bypass system

@@ -6,8 +6,8 @@ import (
 	"math/rand"
 	"time"
 
-	"github.com/chromedp/chromedp"
 	"github.com/chromedp/cdproto/input"
+	"github.com/chromedp/chromedp"
 )
 
 // MouseTrajectory represents a point in mouse movement
@@ -51,7 +51,7 @@ func (gc *GhostCursor) GenerateTrajectory(targetX, targetY float64) []MouseTraje
 	}
 
 	trajectory := make([]MouseTrajectory, steps)
-	
+
 	// Generate Bezier curve points for realistic movement
 	controlX1 := startX + deltaX*0.25 + (gc.random.Float64()-0.5)*distance*0.1
 	controlY1 := startY + deltaY*0.25 + (gc.random.Float64()-0.5)*distance*0.1
@@ -62,11 +62,11 @@ func (gc *GhostCursor) GenerateTrajectory(targetX, targetY float64) []MouseTraje
 
 	for i := 0; i < steps; i++ {
 		t := float64(i) / float64(steps-1)
-		
+
 		// Cubic Bezier curve calculation
-		x := math.Pow(1-t, 3)*startX + 3*math.Pow(1-t, 2)*t*controlX1 + 
+		x := math.Pow(1-t, 3)*startX + 3*math.Pow(1-t, 2)*t*controlX1 +
 			3*(1-t)*math.Pow(t, 2)*controlX2 + math.Pow(t, 3)*targetX
-		y := math.Pow(1-t, 3)*startY + 3*math.Pow(1-t, 2)*t*controlY1 + 
+		y := math.Pow(1-t, 3)*startY + 3*math.Pow(1-t, 2)*t*controlY1 +
 			3*(1-t)*math.Pow(t, 2)*controlY2 + math.Pow(t, 3)*targetY
 
 		// Add small random variations for more realistic movement
@@ -102,10 +102,10 @@ func (gc *GhostCursor) easeInOutQuad(t float64) float64 {
 // RealClick performs a realistic click with human-like mouse movement
 func (p *CDPPage) RealClick(x, y float64) error {
 	cursor := NewGhostCursor()
-	
+
 	// Generate trajectory to target position
 	trajectory := cursor.GenerateTrajectory(x, y)
-	
+
 	return chromedp.Run(p.ctx,
 		// Move mouse along trajectory
 		chromedp.ActionFunc(func(ctx context.Context) error {
@@ -114,7 +114,7 @@ func (p *CDPPage) RealClick(x, y float64) error {
 				if err := input.DispatchMouseEvent(input.MouseMoved, point.X, point.Y).Do(ctx); err != nil {
 					return err
 				}
-				
+
 				// Add realistic timing delays between movements
 				if i < len(trajectory)-1 {
 					delay := trajectory[i+1].Time - point.Time
@@ -127,7 +127,7 @@ func (p *CDPPage) RealClick(x, y float64) error {
 			}
 			return nil
 		}),
-		
+
 		// Perform the actual click with realistic timing
 		chromedp.ActionFunc(func(ctx context.Context) error {
 			// Mouse down
@@ -136,11 +136,11 @@ func (p *CDPPage) RealClick(x, y float64) error {
 				WithClickCount(1).Do(ctx); err != nil {
 				return err
 			}
-			
+
 			// Realistic click duration (human clicks typically last 50-200ms)
 			clickDuration := time.Duration(50+rand.Intn(150)) * time.Millisecond
 			time.Sleep(clickDuration)
-			
+
 			// Mouse up
 			return input.DispatchMouseEvent(input.MouseReleased, x, y).
 				WithButton(input.Left).
@@ -153,14 +153,14 @@ func (p *CDPPage) RealClick(x, y float64) error {
 func (p *CDPPage) RealHover(x, y float64) error {
 	cursor := NewGhostCursor()
 	trajectory := cursor.GenerateTrajectory(x, y)
-	
+
 	return chromedp.Run(p.ctx,
 		chromedp.ActionFunc(func(ctx context.Context) error {
 			for i, point := range trajectory {
 				if err := input.DispatchMouseEvent(input.MouseMoved, point.X, point.Y).Do(ctx); err != nil {
 					return err
 				}
-				
+
 				if i < len(trajectory)-1 {
 					delay := trajectory[i+1].Time - point.Time
 					if delay > 0 {
@@ -180,7 +180,7 @@ func (p *CDPPage) RealScroll(deltaX, deltaY float64) error {
 	// Add random variations to make scrolling more human-like
 	variationX := deltaX + (rand.Float64()-0.5)*deltaX*0.1
 	variationY := deltaY + (rand.Float64()-0.5)*deltaY*0.1
-	
+
 	return chromedp.Run(p.ctx,
 		chromedp.ActionFunc(func(ctx context.Context) error {
 			return input.DispatchMouseEvent(input.MouseWheel, 0, 0).
@@ -204,7 +204,7 @@ func (p *CDPPage) RealType(text string) error {
 					WithText(string(char)).Do(ctx); err != nil {
 					return err
 				}
-				
+
 				// Add realistic typing delay (humans type at 200-500ms per character)
 				delay := time.Duration(100+rand.Intn(150)) * time.Millisecond
 				time.Sleep(delay)

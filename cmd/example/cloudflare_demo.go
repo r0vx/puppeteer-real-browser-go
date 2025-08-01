@@ -74,7 +74,7 @@ func main() {
 	// Replace with actual Cloudflare-protected URL
 	testURL := "https://nopecha.com/demo/cloudflare"
 	fmt.Printf("📂 Navigating to: %s\n", testURL)
-	
+
 	if err := page.Navigate(testURL); err != nil {
 		log.Printf("❌ Cloudflare test navigation failed: %v", err)
 	} else {

@@ -95,25 +95,25 @@ func testCloudflareBypass(page browser.Page) {
 	for i := 1; i <= 8; i++ {
 		fmt.Printf("⏳ 检查页面状态... (%d/8)\n", i)
 		time.Sleep(2 * time.Second)
-		
+
 		title, err := page.GetTitle()
 		if err != nil {
 			continue
 		}
-		
+
 		fmt.Printf("📄 当前标题: %s\n", title)
-		
+
 		if isSuccess(title) {
 			fmt.Println("🎉 成功绕过 Cloudflare 保护!")
 			return
 		}
-		
+
 		if isBlocked(title) {
 			fmt.Println("🚫 被 Cloudflare 阻止")
 			return
 		}
 	}
-	
+
 	fmt.Println("❓ 页面状态未确定")
 }
 
@@ -123,7 +123,7 @@ func isSuccess(title string) bool {
 		"faucet",
 		"testnet",
 	}
-	
+
 	titleLower := strings.ToLower(title)
 	for _, indicator := range successIndicators {
 		if strings.Contains(titleLower, indicator) {
@@ -142,7 +142,7 @@ func isBlocked(title string) bool {
 		"verifying you are human",
 		"security check",
 	}
-	
+
 	titleLower := strings.ToLower(title)
 	for _, indicator := range blockIndicators {
 		if strings.Contains(titleLower, indicator) {

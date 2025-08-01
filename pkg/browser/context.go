@@ -24,7 +24,7 @@ func (bc *BrowserContext) NewPage() (Page, error) {
 			UseCustomCDP: false,
 		}
 	}
-	
+
 	page := &CDPPage{
 		ctx:         tabCtx,
 		cancel:      tabCancel,
