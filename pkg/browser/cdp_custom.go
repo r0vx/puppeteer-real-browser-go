@@ -559,3 +559,17 @@ func (p *CustomCDPPage) GetURL() (string, error) {
 func (p *CustomCDPPage) Close() error {
 	return p.client.Close()
 }
+
+// SetRequestInterception enables or disables request interception (stub for CustomCDPPage)
+func (p *CustomCDPPage) SetRequestInterception(enabled bool) error {
+	// TODO: Implement request interception for CustomCDPPage if needed
+	// For now, return nil to satisfy the interface
+	return nil
+}
+
+// OnRequest sets the request handler for intercepted requests (stub for CustomCDPPage)
+func (p *CustomCDPPage) OnRequest(handler RequestHandler) error {
+	// TODO: Implement request handler for CustomCDPPage if needed
+	// For now, return nil to satisfy the interface
+	return nil
+}

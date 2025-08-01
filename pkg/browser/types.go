@@ -3,6 +3,7 @@ package browser
 import (
 	"context"
 	"os/exec"
+	"fmt"
 )
 
 // Browser represents a browser instance interface
@@ -61,6 +62,14 @@ type BrowserInstance struct {
 	cancel  context.CancelFunc
 }
 
+// BrowserContext represents a browser context (like puppeteer browserContext)
+type BrowserContext struct {
+	allocCtx    context.Context
+	allocCancel context.CancelFunc
+	chrome      *ChromeProcess
+	opts        *ConnectOptions
+}
+
 // ChromeProcess represents a Chrome process
 type ChromeProcess struct {
 	Cmd   *exec.Cmd
@@ -81,6 +90,56 @@ type Page interface {
 	SetViewport(width, height int) error
 	GetTitle() (string, error)
 	GetURL() (string, error)
+	SetRequestInterception(enabled bool) error
+	OnRequest(handler RequestHandler) error
+}
+
+// RequestHandler is a function type for handling intercepted requests
+type RequestHandler func(req *InterceptedRequest) error
+
+// InterceptedRequest represents an intercepted network request
+type InterceptedRequest struct {
+	URL          string
+	Method       string
+	Headers      map[string]string
+	ResourceType string
+	RequestID    string
+	page         Page
+}
+
+// setPageContext sets the page context for request operations (internal method)
+func (req *InterceptedRequest) setPageContext(page Page) {
+	req.page = page
+}
+
+// InterceptedRequest methods for responding to requests
+func (req *InterceptedRequest) Continue() error {
+	if cdpPage, ok := req.page.(*CDPPage); ok {
+		return cdpPage.continueRequest(req.RequestID)
+	}
+	return fmt.Errorf("unsupported page type for Continue")
+}
+
+func (req *InterceptedRequest) Respond(response *RequestResponse) error {
+	if cdpPage, ok := req.page.(*CDPPage); ok {
+		return cdpPage.respondToRequest(req.RequestID, response)
+	}
+	return fmt.Errorf("unsupported page type for Respond")
+}
+
+func (req *InterceptedRequest) Abort() error {
+	if cdpPage, ok := req.page.(*CDPPage); ok {
+		return cdpPage.abortRequest(req.RequestID)
+	}
+	return fmt.Errorf("unsupported page type for Abort")
+}
+
+// RequestResponse represents a custom response for intercepted requests
+type RequestResponse struct {
+	Status      int               `json:"status"`
+	Headers     map[string]string `json:"headers"`
+	Body        string            `json:"body"`
+	ContentType string            `json:"contentType"`
 }
 
 // TurnstileSolver handles Cloudflare Turnstile captcha solving

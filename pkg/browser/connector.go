@@ -2,12 +2,16 @@ package browser
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/chromedp/chromedp"
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/cdproto/dom"
+	"github.com/chromedp/cdproto/network"
+	"github.com/chromedp/cdproto/fetch"
 )
 
 // CDPConnector handles Chrome DevTools Protocol connections
@@ -24,6 +28,8 @@ func (cc *CDPConnector) Connect(ctx context.Context, chrome *ChromeProcess, opts
 	allocCtx, cancel := chromedp.NewRemoteAllocator(ctx, fmt.Sprintf("http://localhost:%d", chrome.Port))
 
 	// Create context for the browser tab
+	// Note: This creates a new tab/window - currently results in 2 windows total
+	// TODO: Research chromedp methods to connect to existing tab instead
 	tabCtx, tabCancel := chromedp.NewContext(allocCtx)
 
 	// Create page instance
@@ -47,13 +53,15 @@ func (cc *CDPConnector) Connect(ctx context.Context, chrome *ChromeProcess, opts
 
 // CDPPage implements the Page interface using chromedp
 type CDPPage struct {
-	ctx         context.Context
-	cancel      context.CancelFunc
-	allocCtx    context.Context
-	allocCancel context.CancelFunc
-	chrome      *ChromeProcess
-	opts        *ConnectOptions
-	initialized bool
+	ctx            context.Context
+	cancel         context.CancelFunc
+	allocCtx       context.Context
+	allocCancel    context.CancelFunc
+	chrome         *ChromeProcess
+	opts           *ConnectOptions
+	initialized    bool
+	requestHandler RequestHandler
+	interceptEnabled bool
 }
 
 // initialize sets up the page with Runtime.Enable bypass (rebrowser-patches style)
@@ -291,4 +299,144 @@ func (p *CDPPage) setupAdditionalStealth() chromedp.Action {
 		}
 		return nil
 	})
+}
+
+// SetRequestInterception enables or disables request interception
+func (p *CDPPage) SetRequestInterception(enabled bool) error {
+	p.interceptEnabled = enabled
+	
+	if enabled {
+		// Enable both Network and Fetch domains for comprehensive request interception
+		return chromedp.Run(p.ctx, chromedp.ActionFunc(func(ctx context.Context) error {
+			// Enable Network domain first
+			if err := network.Enable().Do(ctx); err != nil {
+				return fmt.Errorf("failed to enable Network domain: %w", err)
+			}
+			
+			// Enable fetch domain with request patterns - intercept everything
+			patterns := []*fetch.RequestPattern{{
+				URLPattern: "*",
+			}}
+			if err := fetch.Enable().WithHandleAuthRequests(false).WithPatterns(patterns).Do(ctx); err != nil {
+				return fmt.Errorf("failed to enable Fetch domain: %w", err)
+			}
+			
+			// Set up request interception listener
+			chromedp.ListenTarget(ctx, func(ev interface{}) {
+				switch e := ev.(type) {
+				case *fetch.EventRequestPaused:
+					// Handle in a goroutine to avoid blocking
+					go func() {
+						if p.requestHandler != nil {
+							// Create InterceptedRequest
+							req := &InterceptedRequest{
+								URL:          e.Request.URL,
+								Method:       e.Request.Method,
+								Headers:      make(map[string]string),
+								ResourceType: string(e.ResourceType),
+								RequestID:    string(e.RequestID),
+							}
+							
+							// Convert headers
+							for name, value := range e.Request.Headers {
+								if str, ok := value.(string); ok {
+									req.Headers[name] = str
+								}
+							}
+							
+							// Set page context for request operations
+							req.setPageContext(p)
+							
+							// Call handler
+							if err := p.requestHandler(req); err != nil {
+								// If handler fails, continue the request
+								fetch.ContinueRequest(e.RequestID).Do(ctx)
+							}
+						} else {
+							// No handler, continue request
+							fetch.ContinueRequest(e.RequestID).Do(ctx)
+						}
+					}()
+				}
+			})
+			
+			return nil
+		}))
+	} else {
+		// Disable fetch domain
+		return chromedp.Run(p.ctx, chromedp.ActionFunc(func(ctx context.Context) error {
+			return fetch.Disable().Do(ctx)
+		}))
+	}
+}
+
+// OnRequest sets the request handler for intercepted requests
+func (p *CDPPage) OnRequest(handler RequestHandler) error {
+	p.requestHandler = handler
+	return nil
+}
+
+// continueRequest continues an intercepted request
+func (p *CDPPage) continueRequest(requestID string) error {
+	return chromedp.Run(p.ctx, chromedp.ActionFunc(func(ctx context.Context) error {
+		return fetch.ContinueRequest(fetch.RequestID(requestID)).Do(ctx)
+	}))
+}
+
+// respondToRequest responds to an intercepted request with custom response
+func (p *CDPPage) respondToRequest(requestID string, response *RequestResponse) error {
+	return chromedp.Run(p.ctx, chromedp.ActionFunc(func(ctx context.Context) error {
+		// Convert headers to the format expected by CDP
+		headers := make([]*fetch.HeaderEntry, 0, len(response.Headers))
+		for name, value := range response.Headers {
+			headers = append(headers, &fetch.HeaderEntry{
+				Name:  name,
+				Value: value,
+			})
+		}
+		
+		// Ensure we have content-type header
+		hasContentType := false
+		for _, header := range headers {
+			if strings.ToLower(header.Name) == "content-type" {
+				hasContentType = true
+				break
+			}
+		}
+		if !hasContentType {
+			headers = append(headers, &fetch.HeaderEntry{
+				Name:  "content-type",
+				Value: "text/html; charset=utf-8",
+			})
+		}
+
+		// Use FulfillRequest with proper base64 encoding for body
+		cmd := fetch.FulfillRequest(fetch.RequestID(requestID), int64(response.Status))
+		
+		if len(headers) > 0 {
+			cmd = cmd.WithResponseHeaders(headers)
+		}
+		
+		if response.Body != "" {
+			// Fetch.FulfillRequest expects body as base64 encoded string
+			bodyBase64 := base64.StdEncoding.EncodeToString([]byte(response.Body))
+			cmd = cmd.WithBody(bodyBase64)
+		}
+		
+		err := cmd.Do(ctx)
+		if err != nil {
+			// Log error but don't return it immediately, try to continue the request instead
+			fmt.Printf("Failed to fulfill request: %v, continuing request instead\n", err)
+			return fetch.ContinueRequest(fetch.RequestID(requestID)).Do(ctx)
+		}
+		
+		return nil
+	}))
+}
+
+// abortRequest aborts an intercepted request
+func (p *CDPPage) abortRequest(requestID string) error {
+	return chromedp.Run(p.ctx, chromedp.ActionFunc(func(ctx context.Context) error {
+		return fetch.FailRequest(fetch.RequestID(requestID), network.ErrorReasonAborted).Do(ctx)
+	}))
 }

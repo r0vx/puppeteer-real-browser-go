@@ -3,6 +3,8 @@ package browser
 import (
 	"context"
 	"fmt"
+	
+	"github.com/chromedp/chromedp"
 )
 
 // RealBrowser implements the Browser interface
@@ -94,6 +96,39 @@ func (bi *BrowserInstance) Browser() Browser {
 // Chrome returns the Chrome process
 func (bi *BrowserInstance) Chrome() *ChromeProcess {
 	return bi.chrome
+}
+
+// CreateBrowserContext creates a new browser context (like puppeteer browser.createBrowserContext())
+// This creates an independent browser context that can have multiple pages
+func (bi *BrowserInstance) CreateBrowserContext(opts *BrowserContextOptions) (*BrowserContext, error) {
+	if bi.chrome == nil {
+		return nil, fmt.Errorf("chrome process not available")
+	}
+
+	// Create allocator context for connecting to existing Chrome instance
+	// This connects to the same Chrome process but creates a new context
+	allocCtx, allocCancel := chromedp.NewRemoteAllocator(context.Background(), fmt.Sprintf("http://localhost:%d", bi.chrome.Port))
+
+	// Create the browser context
+	browserCtx := &BrowserContext{
+		allocCtx:    allocCtx,
+		allocCancel: allocCancel,
+		chrome:      bi.chrome,
+		opts:        nil, // Don't assume page type - will be set when needed
+	}
+	
+	// Try to get options from the page if it's a CDPPage
+	if cdpPage, ok := bi.page.(*CDPPage); ok {
+		browserCtx.opts = cdpPage.opts
+	}
+
+	return browserCtx, nil
+}
+
+// BrowserContextOptions represents options for creating browser context
+type BrowserContextOptions struct {
+	IgnoreHTTPSErrors bool
+	ProxyServer       string
 }
 
 // launchChrome starts a Chrome process
