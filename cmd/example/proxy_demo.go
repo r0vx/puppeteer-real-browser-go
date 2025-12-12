@@ -13,8 +13,8 @@ import (
 )
 
 func main() {
-	fmt.Println("🌐 HTTP 代理功能演示")
-	fmt.Println("===================")
+	fmt.Println("🌐 HTTP/SOCKS5 代理功能演示")
+	fmt.Println("===========================")
 	fmt.Println()
 
 	ctx := context.Background()
@@ -24,10 +24,15 @@ func main() {
 	fmt.Println("-------------------------------------")
 	testNoProxy(ctx)
 
-	// 场景 2: 使用真实代理进行测试
-	fmt.Println("\n📝 场景 2: 真实代理测试（从 API 获取）")
+	// 场景 2: HTTP 代理测试
+	fmt.Println("\n📝 场景 2: HTTP 代理测试")
 	fmt.Println("-------------------------------------")
-	testRealProxy(ctx)
+	testHTTPProxy(ctx)
+
+	// 场景 3: SOCKS5 代理测试
+	fmt.Println("\n📝 场景 3: SOCKS5 代理测试")
+	fmt.Println("-------------------------------------")
+	testSocks5Proxy(ctx)
 
 	fmt.Println("\n✅ 所有场景演示完成！")
 	fmt.Println()
@@ -38,76 +43,118 @@ func main() {
 type ProxyAPIResponse struct {
 	Code int `json:"code"`
 	Data []struct {
-		IP       string `json:"ip"`
-		Port     int    `json:"port"`
-		ExpireAt string `json:"expire_at"`
-		City     string `json:"city"`
-		ISP      string `json:"isp"`
+		IP   string `json:"ip"`
+		Port int    `json:"port"`
+		Prov string `json:"prov"`
+		City string `json:"city"`
+		ISP  string `json:"isp"`
 	} `json:"data"`
-	Msg     string `json:"msg"`
-	Success bool   `json:"success"`
 }
 
 // fetchProxyFromAPI 从 API 获取代理 IP
 func fetchProxyFromAPI() (*browser.ProxyConfig, error) {
 	apiURL := "http://api.shenlongip.com/ip?key=3da66g0n&area=430300&protocol=1&mr=1&pattern=json&need=1011&count=1&sign=268c0564b635a9cb201d782e96a055c2"
-	
+	// get 响应 ： {"code":200,"data":[{"ip":"223.156.86.184","port":40011,"prov":"湖南","city":"湘潭","isp":"电信"}]}
+
 	fmt.Println("🔍 从 API 获取代理 IP...")
-	
+
 	resp, err := http.Get(apiURL)
 	if err != nil {
 		return nil, fmt.Errorf("请求失败: %w", err)
 	}
 	defer resp.Body.Close()
-	
+
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("读取响应失败: %w", err)
 	}
-	
+
+	fmt.Printf("   API 响应: %s\n", string(body))
+
 	var proxyResp ProxyAPIResponse
 	if err := json.Unmarshal(body, &proxyResp); err != nil {
 		return nil, fmt.Errorf("解析 JSON 失败: %w", err)
 	}
-	
-	if !proxyResp.Success || len(proxyResp.Data) == 0 {
-		return nil, fmt.Errorf("获取代理失败: %s", proxyResp.Msg)
+
+	if proxyResp.Code != 200 || len(proxyResp.Data) == 0 {
+		return nil, fmt.Errorf("获取代理失败: code=%d", proxyResp.Code)
 	}
-	
+
 	proxyData := proxyResp.Data[0]
 	proxyConfig := &browser.ProxyConfig{
 		Host: proxyData.IP,
 		Port: fmt.Sprintf("%d", proxyData.Port),
 	}
-	
-	fmt.Printf("✅ 获取到代理: %s:%s\n", proxyConfig.Host, proxyConfig.Port)
-	fmt.Printf("   位置: %s\n", proxyData.City)
+
+	fmt.Printf("✅ 获取到 HTTP 代理: %s:%s\n", proxyConfig.Host, proxyConfig.Port)
+	fmt.Printf("   位置: %s %s\n", proxyData.Prov, proxyData.City)
 	fmt.Printf("   运营商: %s\n", proxyData.ISP)
-	fmt.Printf("   过期时间: %s\n", proxyData.ExpireAt)
-	
+
 	return proxyConfig, nil
 }
 
-// testRealProxy 测试真实代理
-func testRealProxy(ctx context.Context) {
+// fetchSocks5ProxyFromAPI 从 API 获取 SOCKS5 代理
+func fetchSocks5ProxyFromAPI() (*browser.ProxyConfig, error) {
+	// protocol=2 表示 SOCKS5
+	apiURL := "http://api.shenlongip.com/ip?key=3da66g0n&area=430300&protocol=2&mr=1&pattern=json&need=1011&count=1&sign=268c0564b635a9cb201d782e96a055c2"
+
+	fmt.Println("🔍 从 API 获取 SOCKS5 代理...")
+
+	resp, err := http.Get(apiURL)
+	if err != nil {
+		return nil, fmt.Errorf("请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("读取响应失败: %w", err)
+	}
+
+	fmt.Printf("   API 响应: %s\n", string(body))
+
+	var proxyResp ProxyAPIResponse
+	if err := json.Unmarshal(body, &proxyResp); err != nil {
+		return nil, fmt.Errorf("解析 JSON 失败: %w", err)
+	}
+
+	if proxyResp.Code != 200 || len(proxyResp.Data) == 0 {
+		return nil, fmt.Errorf("获取代理失败: code=%d", proxyResp.Code)
+	}
+
+	proxyData := proxyResp.Data[0]
+	proxyConfig := &browser.ProxyConfig{
+		Host: fmt.Sprintf("socks5://%s", proxyData.IP),
+		Port: fmt.Sprintf("%d", proxyData.Port),
+	}
+
+	fmt.Printf("✅ 获取到 SOCKS5 代理: %s:%s\n", proxyConfig.Host, proxyConfig.Port)
+	fmt.Printf("   位置: %s %s\n", proxyData.Prov, proxyData.City)
+	fmt.Printf("   运营商: %s\n", proxyData.ISP)
+
+	return proxyConfig, nil
+}
+
+// testHTTPProxy 测试 HTTP 代理
+func testHTTPProxy(ctx context.Context) {
 	// 获取代理
 	proxyConfig, err := fetchProxyFromAPI()
 	if err != nil {
 		log.Printf("❌ 获取代理失败: %v", err)
 		return
 	}
-	
+
 	fmt.Println()
-	
+
 	// 先测试直连 IP
 	fmt.Println("🔹 步骤 1: 测试直连 IP")
 	directIP := getMyIP(ctx, nil)
 	if directIP != "" {
 		fmt.Printf("   直连 IP: %s\n", directIP)
 	}
-	
+
 	fmt.Println()
-	
+
 	// 测试代理 IP
 	fmt.Println("🔹 步骤 2: 测试代理 IP")
 	opts := &browser.ConnectOptions{
@@ -117,26 +164,26 @@ func testRealProxy(ctx context.Context) {
 			"--disable-gpu",
 		},
 	}
-	
+
 	fmt.Println("🚀 启动浏览器（使用代理）...")
-	
+
 	instance, err := browser.Connect(ctx, opts)
 	if err != nil {
 		log.Printf("❌ 启动失败: %v", err)
 		return
 	}
 	defer instance.Close()
-	
+
 	page := instance.Page()
-	
+
 	fmt.Println("📂 通过代理访问 IP 检测 API...")
 	if err := page.Navigate("https://api.ipify.org?format=text"); err != nil {
 		log.Printf("❌ 导航失败: %v", err)
 		return
 	}
-	
+
 	time.Sleep(3 * time.Second)
-	
+
 	// 获取代理 IP
 	result, err := page.Evaluate(`document.body.innerText`)
 	if err != nil {
@@ -144,7 +191,7 @@ func testRealProxy(ctx context.Context) {
 	} else {
 		proxyIP := fmt.Sprintf("%v", result)
 		fmt.Printf("   代理 IP: %s\n", proxyIP)
-		
+
 		// 验证代理是否生效
 		if proxyIP != "" && proxyIP != directIP {
 			fmt.Println()
@@ -159,9 +206,9 @@ func testRealProxy(ctx context.Context) {
 			fmt.Printf("   代理 IP: %s\n", proxyIP)
 		}
 	}
-	
+
 	fmt.Println()
-	
+
 	// 测试访问网站
 	fmt.Println("🔹 步骤 3: 测试访问网站")
 	fmt.Println("📂 访问 Example.com...")
@@ -169,16 +216,116 @@ func testRealProxy(ctx context.Context) {
 		log.Printf("❌ 导航失败: %v", err)
 		return
 	}
-	
+
 	time.Sleep(2 * time.Second)
-	
+
 	title, err := page.GetTitle()
 	if err != nil {
 		log.Printf("⚠️  获取标题失败: %v", err)
 	} else {
 		fmt.Printf("✅ 页面标题: %s\n", title)
 	}
-	
+
+	// 截图验证
+	screenshot, err := page.Screenshot()
+	if err != nil {
+		log.Printf("⚠️  截图失败: %v", err)
+	} else {
+		fmt.Printf("✅ 截图成功: %d bytes\n", len(screenshot))
+	}
+}
+
+// testSocks5Proxy 测试 SOCKS5 代理
+func testSocks5Proxy(ctx context.Context) {
+	// 获取 SOCKS5 代理
+	proxyConfig, err := fetchSocks5ProxyFromAPI()
+	if err != nil {
+		log.Printf("❌ 获取 SOCKS5 代理失败: %v", err)
+		return
+	}
+
+	fmt.Println()
+
+	// 先测试直连 IP
+	fmt.Println("🔹 步骤 1: 测试直连 IP")
+	directIP := getMyIP(ctx, nil)
+	if directIP != "" {
+		fmt.Printf("   直连 IP: %s\n", directIP)
+	}
+
+	fmt.Println()
+
+	// 测试 SOCKS5 代理 IP
+	fmt.Println("🔹 步骤 2: 测试 SOCKS5 代理 IP")
+	opts := &browser.ConnectOptions{
+		Headless: true, // 使用 headless 模式提高速度
+		Proxy:    proxyConfig,
+		Args: []string{
+			"--disable-gpu",
+		},
+	}
+
+	fmt.Println("🚀 启动浏览器（使用 SOCKS5 代理）...")
+
+	instance, err := browser.Connect(ctx, opts)
+	if err != nil {
+		log.Printf("❌ 启动失败: %v", err)
+		return
+	}
+	defer instance.Close()
+
+	page := instance.Page()
+
+	fmt.Println("📂 通过 SOCKS5 代理访问 IP 检测 API...")
+	if err := page.Navigate("https://api.ipify.org?format=text"); err != nil {
+		log.Printf("❌ 导航失败: %v", err)
+		return
+	}
+
+	time.Sleep(3 * time.Second)
+
+	// 获取代理 IP
+	result, err := page.Evaluate(`document.body.innerText`)
+	if err != nil {
+		log.Printf("⚠️  获取 IP 失败: %v", err)
+	} else {
+		proxyIP := fmt.Sprintf("%v", result)
+		fmt.Printf("   SOCKS5 代理 IP: %s\n", proxyIP)
+
+		// 验证代理是否生效
+		if proxyIP != "" && proxyIP != directIP {
+			fmt.Println()
+			fmt.Println("✅ SOCKS5 代理验证成功！")
+			fmt.Printf("   直连 IP: %s\n", directIP)
+			fmt.Printf("   SOCKS5 代理 IP: %s\n", proxyIP)
+			fmt.Println("   IP 已改变，SOCKS5 代理生效！")
+		} else {
+			fmt.Println()
+			fmt.Println("⚠️  SOCKS5 代理可能未生效")
+			fmt.Printf("   直连 IP: %s\n", directIP)
+			fmt.Printf("   SOCKS5 代理 IP: %s\n", proxyIP)
+		}
+	}
+
+	fmt.Println()
+
+	// 测试访问网站
+	fmt.Println("🔹 步骤 3: 测试访问网站")
+	fmt.Println("📂 访问 Example.com...")
+	if err := page.Navigate("https://example.com"); err != nil {
+		log.Printf("❌ 导航失败: %v", err)
+		return
+	}
+
+	time.Sleep(2 * time.Second)
+
+	title, err := page.GetTitle()
+	if err != nil {
+		log.Printf("⚠️  获取标题失败: %v", err)
+	} else {
+		fmt.Printf("✅ 页面标题: %s\n", title)
+	}
+
 	// 截图验证
 	screenshot, err := page.Screenshot()
 	if err != nil {
@@ -194,25 +341,25 @@ func getMyIP(ctx context.Context, proxy *browser.ProxyConfig) string {
 		Headless: true,
 		Proxy:    proxy,
 	}
-	
+
 	instance, err := browser.Connect(ctx, opts)
 	if err != nil {
 		return ""
 	}
 	defer instance.Close()
-	
+
 	page := instance.Page()
 	if err := page.Navigate("https://api.ipify.org?format=text"); err != nil {
 		return ""
 	}
-	
+
 	time.Sleep(2 * time.Second)
-	
+
 	result, err := page.Evaluate(`document.body.innerText`)
 	if err != nil {
 		return ""
 	}
-	
+
 	return fmt.Sprintf("%v", result)
 }
 
@@ -256,13 +403,12 @@ func testNoProxy(ctx context.Context) {
 	time.Sleep(3 * time.Second)
 }
 
-
 // PrintProxyGuide 打印代理使用指南
 func PrintProxyGuide() {
 	fmt.Println("📘 代理使用指南")
 	fmt.Println("==============")
 	fmt.Println()
-	
+
 	fmt.Println("1️⃣ 基本代理配置（无认证）")
 	fmt.Println("```go")
 	fmt.Println("opts := &browser.ConnectOptions{")
@@ -273,7 +419,7 @@ func PrintProxyGuide() {
 	fmt.Println("}")
 	fmt.Println("```")
 	fmt.Println()
-	
+
 	fmt.Println("2️⃣ 代理认证（用户名/密码）")
 	fmt.Println("```go")
 	fmt.Println("opts := &browser.ConnectOptions{")
@@ -286,13 +432,13 @@ func PrintProxyGuide() {
 	fmt.Println("}")
 	fmt.Println("```")
 	fmt.Println()
-	
+
 	fmt.Println("3️⃣ 代理类型支持")
 	fmt.Println("  ✅ HTTP 代理")
 	fmt.Println("  ✅ HTTPS 代理")
 	fmt.Println("  ✅ SOCKS5 代理（使用 socks5://host:port 格式）")
 	fmt.Println()
-	
+
 	fmt.Println("4️⃣ 常见问题")
 	fmt.Println("  Q: 代理不生效？")
 	fmt.Println("  A: 检查代理服务器是否可用，防火墙设置")
@@ -303,7 +449,7 @@ func PrintProxyGuide() {
 	fmt.Println("  Q: 如何验证代理生效？")
 	fmt.Println("  A: 访问 https://api.ipify.org 查看 IP")
 	fmt.Println()
-	
+
 	fmt.Println("5️⃣ 免费代理资源（仅供测试）")
 	fmt.Println("  • https://www.proxy-list.download/")
 	fmt.Println("  • https://free-proxy-list.net/")
@@ -311,14 +457,14 @@ func PrintProxyGuide() {
 	fmt.Println()
 	fmt.Println("  ⚠️  注意：免费代理不稳定，生产环境请使用付费代理")
 	fmt.Println()
-	
+
 	fmt.Println("6️⃣ 推荐付费代理服务")
 	fmt.Println("  • Bright Data (原 Luminati)")
 	fmt.Println("  • Oxylabs")
 	fmt.Println("  • Smartproxy")
 	fmt.Println("  • ProxyMesh")
 	fmt.Println()
-	
+
 	fmt.Println("7️⃣ 代理池实现示例")
 	fmt.Println("```go")
 	fmt.Println("type ProxyPool struct {")
@@ -338,38 +484,37 @@ func PrintProxyGuide() {
 func ExampleProxyRotation() {
 	fmt.Println("\n🔄 代理轮换示例")
 	fmt.Println("===============")
-	
+
 	// 代理池
 	proxyList := []*browser.ProxyConfig{
 		{Host: "proxy1.example.com", Port: "8080"},
 		{Host: "proxy2.example.com", Port: "8080"},
 		{Host: "proxy3.example.com", Port: "8080"},
 	}
-	
+
 	ctx := context.Background()
-	
+
 	// 使用不同代理进行多次请求
 	for i, proxy := range proxyList {
 		fmt.Printf("\n第 %d 次请求 - 使用代理: %s:%s\n", i+1, proxy.Host, proxy.Port)
-		
+
 		opts := &browser.ConnectOptions{
 			Headless: true,
 			Proxy:    proxy,
 		}
-		
+
 		instance, err := browser.Connect(ctx, opts)
 		if err != nil {
 			log.Printf("❌ 连接失败: %v", err)
 			continue
 		}
-		
+
 		page := instance.Page()
 		page.Navigate("https://example.com")
 		time.Sleep(1 * time.Second)
-		
+
 		instance.Close()
 	}
-	
+
 	fmt.Println("\n✅ 代理轮换演示完成")
 }
-
