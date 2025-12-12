@@ -125,14 +125,12 @@ func testStealthFeatures(page browser.Page) {
 	fmt.Println("  - Testing stealth features...")
 
 	// Test webdriver property hiding
-	script := `
-		return {
-			webdriver: navigator.webdriver,
-			plugins: navigator.plugins.length,
-			languages: navigator.languages,
-			chrome: typeof window.chrome !== 'undefined'
-		};
-	`
+	script := `({
+		webdriver: navigator.webdriver,
+		plugins: navigator.plugins.length,
+		languages: navigator.languages,
+		chrome: typeof window.chrome !== 'undefined'
+	})`
 
 	result, err := page.Evaluate(script)
 	if err != nil {
@@ -143,7 +141,7 @@ func testStealthFeatures(page browser.Page) {
 	fmt.Printf("  - Stealth test results: %+v\n", result)
 
 	// Test MouseEvent coordinates
-	mouseScript := `
+	mouseScript := `(() => {
 		const event = new MouseEvent('click', {
 			clientX: 100,
 			clientY: 200
@@ -154,7 +152,7 @@ func testStealthFeatures(page browser.Page) {
 			screenX: event.screenX,
 			screenY: event.screenY
 		};
-	`
+	})()`
 
 	mouseResult, err := page.Evaluate(mouseScript)
 	if err != nil {
