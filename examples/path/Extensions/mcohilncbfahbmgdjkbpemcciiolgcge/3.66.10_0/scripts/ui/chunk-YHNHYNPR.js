@@ -1,7 +1,0 @@
-import{a as g}from"./chunk-UZCYU4C6.js";import{n as l}from"./chunk-G44PPNNQ.js";import{fa as m,ra as S}from"./chunk-CYTB2B6Q.js";import{b as a}from"./chunk-OL67KS7C.js";import{f as w,o,q as i}from"./chunk-SHG7TIBL.js";o();i();var s=w(a());function M(){let[r,n]=(0,s.useState)(!1);function t(f){(0,s.startTransition)(()=>{n(f)})}let e=()=>{t(!1)},c=()=>{t(!0)},h=(0,s.useMemo)(()=>({onTouchStart:c,onTouchEnd:e,onTouchMove:e,onMouseDown:c,onMouseUp:e,onMouseLeave:e}),[r]);return{scale:r,animationEvent:h}}o();i();var u=w(a());o();i();var d=w(a());S();var E=()=>{let[r,n]=(0,d.useState)({width:l()?0:window?.innerWidth,height:l()?0:window?.innerHeight});return(0,d.useEffect)(()=>{let t=m(()=>{(r.width!==window.innerWidth||r.height!==window.innerHeight)&&n({width:window.innerWidth,height:window.innerHeight})});return window.addEventListener("resize",t),()=>{window.removeEventListener("resize",t)}},[]),{size:r}},v=E;var U=r=>{let{size:n}=v(),{isMobile:t}=g(),e=r||63;return(0,u.useMemo)(()=>t?null:n.height>=1200?1e3-e:n.height<=768?n.height-e-32:n.height-e-200,[n,t,e])},y=(r,n)=>{let t=(0,u.useRef)(null);(0,u.useEffect)(()=>{let e=r?.current;return e&&(t.current=new ResizeObserver(c=>{for(let h=0;h<c.length;h++){let f=c[h];if(f.contentRect){let z=f.contentRect;n(z);return}}}),t.current.observe(e)),()=>{t?.current&&e&&t.current.unobserve(e)}},[n,r])};export{M as a,U as b,y as c};
-
-window.inOKXExtension = true;
-window.inMiniApp = false;
-window.ASSETS_BUILD_TYPE = "publish";
-
-//# sourceMappingURL=chunk-YHNHYNPR.js.map

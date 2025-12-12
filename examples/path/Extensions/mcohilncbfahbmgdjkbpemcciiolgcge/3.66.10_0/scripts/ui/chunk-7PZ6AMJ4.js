@@ -1,7 +1,0 @@
-import{a as b}from"./chunk-SIITVWZR.js";import{H as m,y as l}from"./chunk-MOTAOJVG.js";import{aa as s}from"./chunk-6M3PZK2X.js";import{b as u}from"./chunk-OL67KS7C.js";import{f as _,o as t,q as i}from"./chunk-SHG7TIBL.js";t();i();var e=_(u()),r=_(b());m();t();i();var n={benefits:"_benefits_1ds7w_1",benefitItem:"_benefitItem_1ds7w_12",benefitIcon:"_benefitIcon_1ds7w_15",benefitTitle:"_benefitTitle_1ds7w_20",benefitDesc:"_benefitDesc_1ds7w_26"};function p(){let c=[{icon:"okx-wallet-plugin-swap-for-gas-new",title:"wallet_extension_function_regularcell_title_gas_options",desc:"wallet_extension_function_regularcell_desc_gas_options"},{icon:"okx-wallet-plugin-web3-all-transaction",title:"wallet_extension_function_regularcell_title_bundle_txs",desc:"wallet_extension_function_regularcell_desc_bundle_txs"},{icon:"okx-wallet-plugin-trading-bot",title:"wallet_extension_function_regularcell_title_wallet_auto",desc:"wallet_extension_function_regularcell_desc_wallet_auto"}];return e.default.createElement("div",{className:n.benefits},c.map(({icon:f,title:o,desc:d})=>e.default.createElement("div",{className:n.benefitItem,key:o},e.default.createElement(s,{className:(0,r.default)(f,n.benefitIcon)}),e.default.createElement("div",null,e.default.createElement("div",{className:n.benefitTitle},l(o)),e.default.createElement("div",{className:n.benefitDesc},l(d))))))}var w=p;t();i();export{w as a};
-
-window.inOKXExtension = true;
-window.inMiniApp = false;
-window.ASSETS_BUILD_TYPE = "publish";
-
-//# sourceMappingURL=chunk-7PZ6AMJ4.js.map

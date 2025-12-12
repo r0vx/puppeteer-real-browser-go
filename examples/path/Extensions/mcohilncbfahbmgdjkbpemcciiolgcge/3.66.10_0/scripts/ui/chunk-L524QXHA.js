@@ -1,7 +1,0 @@
-import{e as a}from"./chunk-ZFTHPYIG.js";import{Gd as l,Pd as M,Wa as v,Ya as s,ib as H,pd as x,xd as c,yd as f}from"./chunk-QHXUL3YM.js";import{b as I}from"./chunk-T2ETCKOI.js";import{f as p,o,p as i,q as e}from"./chunk-SHG7TIBL.js";o();e();M();o();e();var u=p(I());function O(t){return/^0x[0-9a-fA-F]{40}$/.test(t)}function h(t){try{let r=(0,u.toBech32)("one",i.Buffer.from(t.slice(2),"hex"));return r.length===42?r:t}catch{return t}}function T(t){try{let r=`0x${(0,u.fromBech32)(t)[1].toString("hex")}`;return O(r)?r:t}catch{return t}}o();e();function C(t){return/^0x[0-9a-fA-F]{40}$/.test(t)}function y(t){return C(t)?t.replace("0x","ronin:"):t}function A(t){let r=t.replace("ronin:","0x");return C(r)?r:t}var W=t=>!!a(t),Y=(t,r,n={})=>{let E=typeof t=="string"&&typeof r=="string",N=n.baseCoinId||n.localType;if(!E||!N)return!1;let g=n.localType||l({coinId:n.baseCoinId})?.localType;return W(g)?t.toLowerCase()===r.toLowerCase():t===r},j=(t,r)=>r===c?A(t):r===f?T(t):t,q=(t,r)=>r===c?y(t):r===f?h(t):t,z=t=>t===c||t===f?t:x;function D(t=""){return t.length<11?t:`${t.slice(0,6)}...${t.slice(-4)}`}o();e();o();e();var m=p(v());H();var U=async t=>{try{let{TrxWallet:r}=await s(),n=r.toHexAddress(t);return n.indexOf("41")===0&&n.length===42?(0,m.addHexPrefix)(n.substring(2)):(0,m.addHexPrefix)(n)}catch{}return""};export{U as a,Y as b,j as c,q as d,z as e,D as f};
-
-window.inOKXExtension = true;
-window.inMiniApp = false;
-window.ASSETS_BUILD_TYPE = "publish";
-
-//# sourceMappingURL=chunk-L524QXHA.js.map

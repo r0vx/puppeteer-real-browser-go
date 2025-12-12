@@ -20,6 +20,89 @@ func NewFingerprintInjector(config *FingerprintConfig) *FingerprintInjector {
 
 // GenerateInjectionScript 生成完整的JavaScript注入脚本
 func (fi *FingerprintInjector) GenerateInjectionScript() string {
+	return fi.GenerateInjectionScriptEnhanced()
+}
+
+// GenerateInjectionScriptEnhanced 生成增强版注入脚本（默认使用）
+func (fi *FingerprintInjector) GenerateInjectionScriptEnhanced() string {
+	// 使用增强版 Audio/WebGL 注入器
+	enhancedInjector := NewEnhancedAudioWebGLInjector(fi.config)
+	
+	// 使用时间戳指纹注入器
+	timestampInjector := NewTimestampFingerprintInjector(fi.config)
+	
+	var scripts []string
+	
+	// ===== 第一部分：时间戳修改（必须最先执行！）=====
+	scripts = append(scripts, timestampInjector.GenerateTimestampInjectionScript())
+	
+	// ===== 第二部分：基础属性修改 =====
+	// 注入navigator对象修改
+	scripts = append(scripts, fi.generateNavigatorScript())
+	
+	// 注入screen对象修改
+	scripts = append(scripts, fi.generateScreenScript())
+	
+	// ===== 第三部分：增强版 Audio/WebGL 修改 =====
+	// 注入增强版 WebGL 修改（替换原版本）
+	scripts = append(scripts, enhancedInjector.GenerateEnhancedWebGLScript())
+	
+	// 注入Canvas修改
+	scripts = append(scripts, fi.generateCanvasScript())
+	
+	// 注入增强版 AudioContext 修改（替换原版本）
+	scripts = append(scripts, enhancedInjector.GenerateEnhancedAudioScript())
+	
+	// ===== 第四部分：其他指纹修改 =====
+	// 注入时区修改（注意：已在时间戳脚本中处理，这里可能重复但确保兼容性）
+	scripts = append(scripts, fi.generateTimezoneScript())
+	
+	// 注入字体修改
+	scripts = append(scripts, fi.generateFontsScript())
+	
+	// 注入插件修改
+	scripts = append(scripts, fi.generatePluginsScript())
+	
+	// 注入电池API修改
+	scripts = append(scripts, fi.generateBatteryScript())
+	
+	// 注入媒体设备修改
+	scripts = append(scripts, fi.generateMediaDevicesScript())
+	
+	// 注入网络信息修改
+	scripts = append(scripts, fi.generateNetworkScript())
+	
+	// 包装所有脚本
+	fullScript := fmt.Sprintf(`
+(function() {
+    'use strict';
+    
+    console.log('🔒 开始注入完整增强版指纹修改脚本（包括TS1时间戳）...');
+    
+    // 防止脚本被检测
+    const originalDefineProperty = Object.defineProperty;
+    const originalGetOwnPropertyDescriptor = Object.getOwnPropertyDescriptor;
+    
+    %s
+    
+    // 清理痕迹
+    delete window.fingerprintConfig;
+    
+    console.log('✅ 完整指纹注入完成 - 用户: %s');
+    console.log('   🕐 时间戳哈希: %s');
+    console.log('   🔊 预期Audio哈希: %s');
+    console.log('   🎨 预期WebGL哈希: %s');
+})();
+`, strings.Join(scripts, "\n\n    "), fi.config.UserID,
+		timestampInjector.CalculateExpectedTimestampHash()[:16]+"...",
+		enhancedInjector.CalculateExpectedAudioHash()[:16]+"...",
+		enhancedInjector.CalculateExpectedWebGLHash()[:16]+"...")
+	
+	return fullScript
+}
+
+// GenerateInjectionScriptLegacy 生成传统版本的注入脚本（不使用增强版）
+func (fi *FingerprintInjector) GenerateInjectionScriptLegacy() string {
 	var scripts []string
 	
 	// 注入navigator对象修改

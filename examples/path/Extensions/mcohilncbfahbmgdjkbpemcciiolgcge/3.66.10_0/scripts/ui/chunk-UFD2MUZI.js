@@ -1,7 +1,0 @@
-import{a as C}from"./chunk-CEM2RCMY.js";import{a as x}from"./chunk-SIITVWZR.js";import{A as N}from"./chunk-XR4SQWL7.js";import{b as _}from"./chunk-OL67KS7C.js";import{f as m,o,q as s}from"./chunk-SHG7TIBL.js";o();s();var i=m(_());var b=m(x());function w({className:d,style:e,text:l,maxWidth:h,tooltipProps:f={},...n}){let t=(0,i.useRef)(null),[u,r]=(0,i.useState)(!1);return(0,i.useEffect)(()=>{r(t.current&&C(t.current))},[l]),i.default.createElement(N,{disabled:!u,title:l,...f,prefixClassName:(0,b.default)("text-ellipsis-tooltip",f?.prefixClassName)},i.default.createElement("div",{className:(0,b.default)("text-ellipsis-tooltip__text",d),style:{...e||{},maxWidth:h},ref:t,...n},l))}var E=(0,i.memo)(w);o();s();o();s();var c=m(_());var I=m(x());o();s();var p=m(_()),T=m(x());function S({className:d,text:e,keyword:l,ignoreCase:h=!0,customRender:f}){if(!e||!l)return e;let n=[],t=0,u=e,r=l;h&&(u=e.toLowerCase(),r=l.toLowerCase());let a=u.indexOf(r,t);for(;a!==-1;)n.push({subText:e.slice(t,a),highlight:!1}),t=a+r.length,n.push({subText:e.slice(a,t),highlight:!0}),a=u.indexOf(r,t);return n.push({subText:e.slice(t),highlight:!1}),p.default.createElement(p.default.Fragment,null,n.map(({subText:y,highlight:v},L)=>p.default.createElement("span",{className:(0,T.default)(d,{"highlight-keyword":v}),key:L},f?f(y,v):y)))}var D=(0,p.memo)(S);export{E as a};
-
-window.inOKXExtension = true;
-window.inMiniApp = false;
-window.ASSETS_BUILD_TYPE = "publish";
-
-//# sourceMappingURL=chunk-UFD2MUZI.js.map
