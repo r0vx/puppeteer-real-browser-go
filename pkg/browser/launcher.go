@@ -10,12 +10,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/HNRow/puppeteer-real-browser-go/internal/config"
-	"github.com/HNRow/puppeteer-real-browser-go/internal/utils"
+	"github.com/r0vx/puppeteer-real-browser-go/internal/config"
+	"github.com/r0vx/puppeteer-real-browser-go/internal/utils"
 )
 
 // ChromeLauncher handles Chrome process launching
-type ChromeLauncher struct{
+type ChromeLauncher struct {
 	xvfb *XvfbManager
 }
 
@@ -83,7 +83,6 @@ func (cl *ChromeLauncher) Launch(ctx context.Context, opts *ConnectOptions) (*Ch
 		return nil, fmt.Errorf("Chrome failed to start properly: %w", err)
 	}
 
-
 	return chrome, nil
 }
 
@@ -123,13 +122,13 @@ func (cl *ChromeLauncher) buildChromeFlags(opts *ConnectOptions, port int) ([]st
 
 		// Add extension flags if configured
 		extensions := opts.Extensions
-		
+
 		// 如果启用自动加载默认扩展，添加到临时加载列表
 		if opts.AutoLoadDefaultExtensions {
 			defaultExtensions := config.GetDefaultExtensionPaths()
 			extensions = append(extensions, defaultExtensions...)
 		}
-		
+
 		// 如果启用了自动加载默认扩展，需要确保添加--enable-extensions
 		var extensionFlags []string
 		if opts.AutoLoadDefaultExtensions || len(extensions) > 0 {
@@ -178,13 +177,13 @@ func (cl *ChromeLauncher) buildChromeFlags(opts *ConnectOptions, port int) ([]st
 
 		// 处理扩展
 		extensions := opts.Extensions
-		
+
 		// 如果启用自动加载默认扩展，添加到临时加载列表
 		if opts.AutoLoadDefaultExtensions {
 			defaultExtensions := config.GetDefaultExtensionPaths()
 			extensions = append(extensions, defaultExtensions...)
 		}
-		
+
 		// 处理扩展标志
 		var extensionFlags []string
 		if opts.AutoLoadDefaultExtensions || len(extensions) > 0 {
@@ -197,7 +196,7 @@ func (cl *ChromeLauncher) buildChromeFlags(opts *ConnectOptions, port int) ([]st
 		} else {
 			extensionFlags = config.GetExtensionFlags(extensions)
 		}
-		
+
 		// Merge all flags
 		flags = config.MergeFlags(
 			filteredFlags,
@@ -376,7 +375,7 @@ func (cl *ChromeLauncher) StopXvfb() error {
 
 // isLinux checks if the current platform is Linux
 func isLinux() bool {
-	return os.Getenv("GOOS") == "linux" || 
+	return os.Getenv("GOOS") == "linux" ||
 		(os.Getenv("GOOS") == "" && fileExists("/proc/version"))
 }
 

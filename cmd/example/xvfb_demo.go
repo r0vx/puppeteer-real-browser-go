@@ -7,7 +7,7 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/HNRow/puppeteer-real-browser-go/pkg/browser"
+	"github.com/r0vx/puppeteer-real-browser-go/pkg/browser"
 )
 
 func main() {
@@ -17,7 +17,7 @@ func main() {
 
 	// 检查平台
 	fmt.Printf("当前平台: %s/%s\n", runtime.GOOS, runtime.GOARCH)
-	
+
 	if runtime.GOOS != "linux" {
 		fmt.Println("⚠️  Xvfb 只在 Linux 平台上需要")
 		fmt.Println("其他平台会自动使用系统显示")
@@ -55,7 +55,7 @@ func testDefaultConfig(ctx context.Context) {
 	}
 
 	fmt.Println("🚀 启动浏览器（自动管理 Xvfb）...")
-	
+
 	if runtime.GOOS == "linux" {
 		// 检查 Xvfb 是否安装
 		if browser.IsXvfbInstalled() {
@@ -212,12 +212,12 @@ func PrintXvfbInfo() {
 	fmt.Println("  ❌ headless: true（无头模式）")
 	fmt.Println("  ❌ 已有图形界面（DISPLAY 已设置）")
 	fmt.Println()
-	
+
 	if runtime.GOOS == "linux" {
 		fmt.Println("安装 Xvfb:")
 		fmt.Printf("  %s\n", browser.GetXvfbInstallCommand())
 		fmt.Println()
-		
+
 		if browser.IsXvfbInstalled() {
 			fmt.Println("✅ Xvfb 已安装在您的系统上")
 		} else {
@@ -230,4 +230,3 @@ func init() {
 	// 程序启动时打印 Xvfb 信息
 	PrintXvfbInfo()
 }
-

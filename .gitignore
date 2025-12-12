@@ -4,7 +4,10 @@
 *.dll
 *.so
 *.dylib
-
+.idea/*
+.vscode/*
+.cursor/*
+.claude/*
 # Test binary, built with `go test -c`
 *.test
 

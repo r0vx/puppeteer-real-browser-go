@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/HNRow/puppeteer-real-browser-go/pkg/browser"
+	"github.com/r0vx/puppeteer-real-browser-go/pkg/browser"
 )
 
 func main() {

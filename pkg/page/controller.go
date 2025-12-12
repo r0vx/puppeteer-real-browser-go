@@ -6,7 +6,7 @@ import (
 	"math/rand"
 	"time"
 
-	"github.com/HNRow/puppeteer-real-browser-go/pkg/browser"
+	"github.com/r0vx/puppeteer-real-browser-go/pkg/browser"
 )
 
 // Controller handles page interactions with realistic mouse movements

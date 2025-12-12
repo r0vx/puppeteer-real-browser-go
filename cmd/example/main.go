@@ -6,9 +6,9 @@ import (
 	"log"
 	"time"
 
-	"github.com/HNRow/puppeteer-real-browser-go/pkg/browser"
-	"github.com/HNRow/puppeteer-real-browser-go/pkg/page"
-	"github.com/HNRow/puppeteer-real-browser-go/pkg/turnstile"
+	"github.com/r0vx/puppeteer-real-browser-go/pkg/browser"
+	"github.com/r0vx/puppeteer-real-browser-go/pkg/page"
+	"github.com/r0vx/puppeteer-real-browser-go/pkg/turnstile"
 )
 
 func main() {

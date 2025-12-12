@@ -1,4 +1,4 @@
-module github.com/HNRow/puppeteer-real-browser-go
+module github.com/r0vx/puppeteer-real-browser-go
 
 go 1.25
 

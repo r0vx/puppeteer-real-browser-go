@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/HNRow/puppeteer-real-browser-go/pkg/browser"
+	"github.com/r0vx/puppeteer-real-browser-go/pkg/browser"
 )
 
 // Solver handles Cloudflare Turnstile captcha solving
