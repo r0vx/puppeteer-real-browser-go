@@ -8,6 +8,12 @@ import (
 	"time"
 )
 
+// healthCheck 缓存的健康状态
+type healthCheck struct {
+	isHealthy bool
+	checkedAt time.Time
+}
+
 // BrowserPool 管理浏览器实例池，复用实例以提升性能
 // 相比每次创建新实例，可以节省 70-80% 的启动时间
 type BrowserPool struct {
@@ -48,12 +54,21 @@ func (p *BrowserPool) Acquire(ctx context.Context) (*BrowserInstance, error) {
 	// 尝试从池中获取实例（非阻塞）
 	select {
 	case instance := <-p.instances:
-		// 验证实例是否仍然有效
-		if instance.Chrome() != nil && instance.Chrome().IsRunning() {
+		// 快速路径：检查上次使用时间
+		if time.Since(instance.lastUsed) < 30*time.Second {
+			// 最近使用过，假设仍然有效（避免系统调用）
+			instance.lastUsed = time.Now()
 			return instance, nil
 		}
-		// 实例已失效，关闭并创建新的
-		instance.Close()
+		
+		// 需要验证健康状态
+		if p.isInstanceHealthy(instance) {
+			instance.lastUsed = time.Now()
+			return instance, nil
+		}
+		
+		// 实例已失效，异步关闭（避免阻塞）
+		go instance.Close()
 	default:
 		// 池中没有可用实例
 	}
@@ -64,8 +79,40 @@ func (p *BrowserPool) Acquire(ctx context.Context) (*BrowserInstance, error) {
 		return nil, fmt.Errorf("failed to create browser instance: %w", err)
 	}
 
+	// 初始化实例元数据
+	instance.lastUsed = time.Now()
+	
 	atomic.AddInt32(&p.created, 1)
 	return instance, nil
+}
+
+// isInstanceHealthy 检查实例是否健康（带缓存）
+func (p *BrowserPool) isInstanceHealthy(instance *BrowserInstance) bool {
+	chrome := instance.Chrome()
+	if chrome == nil {
+		return false
+	}
+	
+	// 检查缓存的健康状态
+	if cached := instance.healthStatus.Load(); cached != nil {
+		if health, ok := cached.(healthCheck); ok {
+			// 如果最近5秒内检查过，使用缓存结果
+			if time.Since(health.checkedAt) < 5*time.Second {
+				return health.isHealthy
+			}
+		}
+	}
+	
+	// 执行实际健康检查（系统调用）
+	isHealthy := chrome.IsRunning()
+	
+	// 更新缓存
+	instance.healthStatus.Store(healthCheck{
+		isHealthy: isHealthy,
+		checkedAt: time.Now(),
+	})
+	
+	return isHealthy
 }
 
 // Release 将实例归还到池中
@@ -83,10 +130,13 @@ func (p *BrowserPool) Release(instance *BrowserInstance) error {
 		return instance.Close()
 	}
 
-	// 检查实例是否仍然有效
-	if instance.Chrome() == nil || !instance.Chrome().IsRunning() {
+	// 检查实例是否仍然有效（使用优化的健康检查）
+	if !p.isInstanceHealthy(instance) {
 		return instance.Close()
 	}
+
+	// 更新最后使用时间
+	instance.lastUsed = time.Now()
 
 	// 尝试放回池中（非阻塞）
 	select {
@@ -142,11 +192,18 @@ func (p *BrowserPool) MaxSize() int {
 	return p.maxSize
 }
 
-// Warmup 预热池，创建指定数量的实例
+// Warmup 预热池，创建指定数量的实例（限制并发）
 func (p *BrowserPool) Warmup(ctx context.Context, count int) error {
 	if count > p.maxSize {
 		count = p.maxSize
 	}
+
+	// 限制并发创建数量（避免资源耗尽）
+	maxConcurrent := 5
+	if count < maxConcurrent {
+		maxConcurrent = count
+	}
+	semaphore := make(chan struct{}, maxConcurrent)
 
 	var wg sync.WaitGroup
 	errChan := make(chan error, count)
@@ -156,11 +213,18 @@ func (p *BrowserPool) Warmup(ctx context.Context, count int) error {
 		go func() {
 			defer wg.Done()
 
+			// 获取信号量（限制并发）
+			semaphore <- struct{}{}
+			defer func() { <-semaphore }()
+
 			instance, err := Connect(ctx, p.opts)
 			if err != nil {
 				errChan <- err
 				return
 			}
+
+			// 初始化实例元数据
+			instance.lastUsed = time.Now()
 
 			atomic.AddInt32(&p.created, 1)
 

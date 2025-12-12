@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/chromedp/cdproto/fetch"
 	"github.com/chromedp/cdproto/page"
@@ -11,15 +12,22 @@ import (
 	"github.com/chromedp/chromedp"
 )
 
+// targetInfo holds context and its cancel function for a target
+type targetInfo struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
 // TargetHandler manages new page/tab events and applies stealth scripts
 type TargetHandler struct {
-	allocCtx    context.Context
-	opts        *ConnectOptions
-	stealthScript string
-	mu          sync.RWMutex
-	targets     map[target.ID]context.Context
-	stopChan    chan struct{}
-	isRunning   bool
+	allocCtx          context.Context
+	opts              *ConnectOptions
+	stealthScript     string
+	mu                sync.RWMutex
+	targets           map[target.ID]*targetInfo // 存储 cancel 函数以防止泄漏
+	stopChan          chan struct{}
+	isRunning         bool
+	activeGoroutines  sync.WaitGroup // 追踪活动的 goroutine
 }
 
 // NewTargetHandler creates a new target handler
@@ -28,7 +36,7 @@ func NewTargetHandler(allocCtx context.Context, opts *ConnectOptions) *TargetHan
 		allocCtx:      allocCtx,
 		opts:          opts,
 		stealthScript: GetSimpleStealthScript(),
-		targets:       make(map[target.ID]context.Context),
+		targets:       make(map[target.ID]*targetInfo),
 		stopChan:      make(chan struct{}),
 	}
 }
@@ -47,8 +55,12 @@ func (th *TargetHandler) Start(ctx context.Context) error {
 	chromedp.ListenBrowser(ctx, func(ev interface{}) {
 		switch e := ev.(type) {
 		case *target.EventTargetCreated:
-			// Handle new target (page/tab) created
-			go th.handleTargetCreated(ctx, e)
+			// Handle new target (page/tab) created in goroutine with tracking
+			th.activeGoroutines.Add(1)
+			go func(event *target.EventTargetCreated) {
+				defer th.activeGoroutines.Done()
+				th.handleTargetCreated(ctx, event)
+			}(e)
 		case *target.EventTargetDestroyed:
 			// Clean up destroyed target
 			th.handleTargetDestroyed(e)
@@ -58,21 +70,50 @@ func (th *TargetHandler) Start(ctx context.Context) error {
 	return nil
 }
 
-// Stop stops the target handler
+// Stop stops the target handler and waits for all goroutines to finish
 func (th *TargetHandler) Stop() {
 	th.mu.Lock()
-	defer th.mu.Unlock()
-	
 	if !th.isRunning {
+		th.mu.Unlock()
 		return
 	}
-	
 	th.isRunning = false
 	close(th.stopChan)
+	
+	// 取消所有 target contexts
+	for _, info := range th.targets {
+		if info.cancel != nil {
+			info.cancel()
+		}
+	}
+	th.targets = make(map[target.ID]*targetInfo)
+	th.mu.Unlock()
+	
+	// 等待所有 goroutine 完成（带超时）
+	done := make(chan struct{})
+	go func() {
+		th.activeGoroutines.Wait()
+		close(done)
+	}()
+	
+	select {
+	case <-done:
+		// 所有 goroutine 已完成
+	case <-time.After(5 * time.Second):
+		// 超时，但继续（避免永久阻塞）
+		fmt.Println("Warning: Some target handler goroutines did not finish within 5 seconds")
+	}
 }
 
 // handleTargetCreated handles a new target (page/tab) being created
 func (th *TargetHandler) handleTargetCreated(ctx context.Context, ev *target.EventTargetCreated) {
+	// 检查是否已停止
+	select {
+	case <-th.stopChan:
+		return
+	default:
+	}
+	
 	// Only handle page targets
 	if ev.TargetInfo.Type != "page" {
 		return
@@ -80,25 +121,43 @@ func (th *TargetHandler) handleTargetCreated(ctx context.Context, ev *target.Eve
 
 	targetID := ev.TargetInfo.TargetID
 	
-	// Create a new context for this target
+	// 创建带超时的 context
 	targetCtx, cancel := chromedp.NewContext(th.allocCtx, chromedp.WithTargetID(targetID))
+	timeoutCtx, timeoutCancel := context.WithTimeout(targetCtx, 30*time.Second)
 	
+	// 组合 cancel 函数
+	combinedCancel := func() {
+		timeoutCancel()
+		cancel()
+	}
+	
+	// 存储 context 和 cancel 函数
 	th.mu.Lock()
-	th.targets[targetID] = targetCtx
+	th.targets[targetID] = &targetInfo{
+		ctx:    targetCtx,
+		cancel: combinedCancel,
+	}
 	th.mu.Unlock()
 
 	// Inject stealth scripts into the new page
-	err := th.injectStealthToTarget(targetCtx)
+	err := th.injectStealthToTarget(timeoutCtx)
 	if err != nil {
 		// Log error but don't fail - the target might have been destroyed
 		fmt.Printf("Warning: failed to inject stealth to new target %s: %v\n", targetID, err)
-		cancel()
+		combinedCancel()
+		
+		// 清理
+		th.mu.Lock()
+		delete(th.targets, targetID)
+		th.mu.Unlock()
 		return
 	}
 
 	// Set up proxy authentication if needed
 	if th.opts.Proxy != nil && th.opts.Proxy.Username != "" {
-		th.setupProxyAuthForTarget(targetCtx)
+		if err := th.setupProxyAuthForTarget(timeoutCtx); err != nil {
+			fmt.Printf("Warning: failed to setup proxy auth for target %s: %v\n", targetID, err)
+		}
 	}
 }
 
@@ -107,7 +166,13 @@ func (th *TargetHandler) handleTargetDestroyed(ev *target.EventTargetDestroyed) 
 	th.mu.Lock()
 	defer th.mu.Unlock()
 	
-	delete(th.targets, ev.TargetID)
+	// 取消 context 以释放资源
+	if info, exists := th.targets[ev.TargetID]; exists {
+		if info.cancel != nil {
+			info.cancel()
+		}
+		delete(th.targets, ev.TargetID)
+	}
 }
 
 // injectStealthToTarget injects stealth scripts to a specific target

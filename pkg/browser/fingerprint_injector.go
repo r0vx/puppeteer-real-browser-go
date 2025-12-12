@@ -4,37 +4,72 @@ import (
 	"crypto/md5"
 	"fmt"
 	"strings"
+	"sync"
 )
 
 // FingerprintInjector JavaScript注入器，用于修改浏览器指纹
 type FingerprintInjector struct {
-	config *FingerprintConfig
+	config                *FingerprintConfig
+	audioWebGLInjector    *EnhancedAudioWebGLInjector
+	timestampInjector     *TimestampFingerprintInjector
+	scriptCache           string
+	scriptCacheMu         sync.RWMutex
+	cacheValid            bool
 }
 
 // NewFingerprintInjector 创建指纹注入器
 func NewFingerprintInjector(config *FingerprintConfig) *FingerprintInjector {
 	return &FingerprintInjector{
-		config: config,
+		config:             config,
+		audioWebGLInjector: NewEnhancedAudioWebGLInjector(config),
+		timestampInjector:  NewTimestampFingerprintInjector(config),
+		cacheValid:         false,
 	}
 }
 
-// GenerateInjectionScript 生成完整的JavaScript注入脚本
+// GenerateInjectionScript 生成完整的JavaScript注入脚本（带缓存）
 func (fi *FingerprintInjector) GenerateInjectionScript() string {
-	return fi.GenerateInjectionScriptEnhanced()
+	// 快速路径：检查缓存
+	fi.scriptCacheMu.RLock()
+	if fi.cacheValid && fi.scriptCache != "" {
+		cached := fi.scriptCache
+		fi.scriptCacheMu.RUnlock()
+		return cached
+	}
+	fi.scriptCacheMu.RUnlock()
+	
+	// 慢速路径：生成脚本并缓存
+	fi.scriptCacheMu.Lock()
+	defer fi.scriptCacheMu.Unlock()
+	
+	// 双重检查（避免重复生成）
+	if fi.cacheValid && fi.scriptCache != "" {
+		return fi.scriptCache
+	}
+	
+	// 生成脚本
+	script := fi.GenerateInjectionScriptEnhanced()
+	fi.scriptCache = script
+	fi.cacheValid = true
+	
+	return script
 }
 
-// GenerateInjectionScriptEnhanced 生成增强版注入脚本（默认使用）
+// InvalidateCache 清除脚本缓存（当配置改变时调用）
+func (fi *FingerprintInjector) InvalidateCache() {
+	fi.scriptCacheMu.Lock()
+	defer fi.scriptCacheMu.Unlock()
+	fi.cacheValid = false
+	fi.scriptCache = ""
+}
+
+// GenerateInjectionScriptEnhanced 生成增强版注入脚本（内部使用，不带缓存）
 func (fi *FingerprintInjector) GenerateInjectionScriptEnhanced() string {
-	// 使用增强版 Audio/WebGL 注入器
-	enhancedInjector := NewEnhancedAudioWebGLInjector(fi.config)
-	
-	// 使用时间戳指纹注入器
-	timestampInjector := NewTimestampFingerprintInjector(fi.config)
-	
+	// 使用预先创建的注入器（避免重复创建）
 	var scripts []string
 	
 	// ===== 第一部分：时间戳修改（必须最先执行！）=====
-	scripts = append(scripts, timestampInjector.GenerateTimestampInjectionScript())
+	scripts = append(scripts, fi.timestampInjector.GenerateTimestampInjectionScript())
 	
 	// ===== 第二部分：基础属性修改 =====
 	// 注入navigator对象修改
@@ -45,13 +80,13 @@ func (fi *FingerprintInjector) GenerateInjectionScriptEnhanced() string {
 	
 	// ===== 第三部分：增强版 Audio/WebGL 修改 =====
 	// 注入增强版 WebGL 修改（替换原版本）
-	scripts = append(scripts, enhancedInjector.GenerateEnhancedWebGLScript())
+	scripts = append(scripts, fi.audioWebGLInjector.GenerateEnhancedWebGLScript())
 	
 	// 注入Canvas修改
 	scripts = append(scripts, fi.generateCanvasScript())
 	
 	// 注入增强版 AudioContext 修改（替换原版本）
-	scripts = append(scripts, enhancedInjector.GenerateEnhancedAudioScript())
+	scripts = append(scripts, fi.audioWebGLInjector.GenerateEnhancedAudioScript())
 	
 	// ===== 第四部分：其他指纹修改 =====
 	// 注入时区修改（注意：已在时间戳脚本中处理，这里可能重复但确保兼容性）
@@ -94,9 +129,9 @@ func (fi *FingerprintInjector) GenerateInjectionScriptEnhanced() string {
     console.log('   🎨 预期WebGL哈希: %s');
 })();
 `, strings.Join(scripts, "\n\n    "), fi.config.UserID,
-		timestampInjector.CalculateExpectedTimestampHash()[:16]+"...",
-		enhancedInjector.CalculateExpectedAudioHash()[:16]+"...",
-		enhancedInjector.CalculateExpectedWebGLHash()[:16]+"...")
+		fi.timestampInjector.CalculateExpectedTimestampHash()[:16]+"...",
+		fi.audioWebGLInjector.CalculateExpectedAudioHash()[:16]+"...",
+		fi.audioWebGLInjector.CalculateExpectedWebGLHash()[:16]+"...")
 	
 	return fullScript
 }
@@ -617,7 +652,7 @@ func (fi *FingerprintInjector) generateAudioScript() string {
                 
                 // 修改connect方法以添加增益节点
                 oscillator.connect = function(destination, output, input) {
-                    if (Math.random() < 0.1) { // 10%的概率添加增益调整
+                    if (Math.random() < 0.1) { // 10%%%%的概率添加增益调整
                         const gainNode = ctx.createGain();
                         gainNode.gain.value = 0.98 + (userAudioSeed %% 100) / 5000; // 微小增益调整
                         originalConnect.call(this, gainNode);

@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"sync/atomic"
+	"time"
 )
 
 // Browser represents a browser instance interface
@@ -65,11 +67,13 @@ type ProxyConfig struct {
 
 // BrowserInstance represents a connected browser instance
 type BrowserInstance struct {
-	browser Browser
-	page    Page
-	chrome  *ChromeProcess
-	ctx     context.Context
-	cancel  context.CancelFunc
+	browser      Browser
+	page         Page
+	chrome       *ChromeProcess
+	ctx          context.Context
+	cancel       context.CancelFunc
+	lastUsed     time.Time      // 最后使用时间（用于健康检查优化）
+	healthStatus atomic.Value   // 缓存的健康状态
 }
 
 // BrowserContext represents a browser context (like puppeteer browserContext)

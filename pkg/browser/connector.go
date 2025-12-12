@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/chromedp/cdproto/dom"
@@ -53,16 +54,18 @@ func (cc *CDPConnector) Connect(ctx context.Context, chrome *ChromeProcess, opts
 
 // CDPPage implements the Page interface using chromedp
 type CDPPage struct {
-	ctx              context.Context
-	cancel           context.CancelFunc
-	allocCtx         context.Context
-	allocCancel      context.CancelFunc
-	chrome           *ChromeProcess
-	opts             *ConnectOptions
-	initialized      bool
-	requestHandler   RequestHandler
-	interceptEnabled bool
-	targetHandler    *TargetHandler
+	ctx                   context.Context
+	cancel                context.CancelFunc
+	allocCtx              context.Context
+	allocCancel           context.CancelFunc
+	chrome                *ChromeProcess
+	opts                  *ConnectOptions
+	initialized           bool
+	requestHandler        RequestHandler
+	interceptEnabled      bool
+	targetHandler         *TargetHandler
+	requestListenerCancel context.CancelFunc // 用于取消请求监听器
+	requestListenerMu     sync.Mutex         // 保护监听器操作
 }
 
 // initialize sets up the page with Runtime.Enable bypass (rebrowser-patches style)
@@ -203,7 +206,15 @@ func (p *CDPPage) GetURL() (string, error) {
 
 // Close closes the page and cleans up resources
 func (p *CDPPage) Close() error {
-	// Stop target handler first
+	// 取消请求监听器
+	p.requestListenerMu.Lock()
+	if p.requestListenerCancel != nil {
+		p.requestListenerCancel()
+		p.requestListenerCancel = nil
+	}
+	p.requestListenerMu.Unlock()
+	
+	// Stop target handler
 	if p.targetHandler != nil {
 		p.targetHandler.Stop()
 	}
@@ -348,9 +359,22 @@ func (p *CDPPage) setupAdditionalStealth() chromedp.Action {
 
 // SetRequestInterception enables or disables request interception
 func (p *CDPPage) SetRequestInterception(enabled bool) error {
+	p.requestListenerMu.Lock()
+	defer p.requestListenerMu.Unlock()
+	
+	// 先取消旧的监听器（如果存在）
+	if p.requestListenerCancel != nil {
+		p.requestListenerCancel()
+		p.requestListenerCancel = nil
+	}
+	
 	p.interceptEnabled = enabled
 
 	if enabled {
+		// 创建专用 context 用于监听器
+		listenerCtx, cancel := context.WithCancel(p.ctx)
+		p.requestListenerCancel = cancel
+		
 		// Enable both Network and Fetch domains for comprehensive request interception
 		return chromedp.Run(p.ctx, chromedp.ActionFunc(func(ctx context.Context) error {
 			// Enable Network domain first
@@ -366,12 +390,19 @@ func (p *CDPPage) SetRequestInterception(enabled bool) error {
 				return fmt.Errorf("failed to enable Fetch domain: %w", err)
 			}
 
-			// Set up request interception listener
-			chromedp.ListenTarget(ctx, func(ev interface{}) {
+			// Set up request interception listener（使用专用 context）
+			chromedp.ListenTarget(listenerCtx, func(ev interface{}) {
 				switch e := ev.(type) {
 				case *fetch.EventRequestPaused:
 					// Handle in a goroutine to avoid blocking
 					go func() {
+						// 检查 listenerCtx 是否已取消
+						select {
+						case <-listenerCtx.Done():
+							return
+						default:
+						}
+						
 						if p.requestHandler != nil {
 							// Create InterceptedRequest
 							req := &InterceptedRequest{

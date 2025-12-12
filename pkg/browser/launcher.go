@@ -295,9 +295,25 @@ func (cp *ChromeProcess) killProcessTree() error {
 		return nil
 	}
 
-	// Kill the main process using syscall
-	if err := syscall.Kill(cp.PID, syscall.SIGKILL); err != nil {
-		return err
+	// 杀整个进程组（负号表示进程组）
+	// 因为启动时设置了 Setpgid: true，Chrome 及其所有子进程都在同一个进程组中
+	if err := syscall.Kill(-cp.PID, syscall.SIGKILL); err != nil {
+		// 进程可能已经不存在
+		if err != syscall.ESRCH {
+			// 如果进程组杀失败，尝试只杀主进程
+			if killErr := syscall.Kill(cp.PID, syscall.SIGKILL); killErr != nil && killErr != syscall.ESRCH {
+				return fmt.Errorf("failed to kill process: %w", killErr)
+			}
+		}
+	}
+
+	// 等待进程完全终止
+	time.Sleep(100 * time.Millisecond)
+
+	// 验证进程已终止
+	if err := syscall.Kill(cp.PID, 0); err == nil {
+		// 进程仍在运行，记录警告但不返回错误
+		fmt.Printf("Warning: Chrome process %d still running after SIGKILL\n", cp.PID)
 	}
 
 	return nil
@@ -333,7 +349,7 @@ func (cl *ChromeLauncher) setupXvfb(opts *ConnectOptions) error {
 
 	// Check if Xvfb is installed
 	if !IsXvfbInstalled() {
-		return fmt.Errorf(GetXvfbWarningMessage())
+		return fmt.Errorf("%s", GetXvfbWarningMessage())
 	}
 
 	// Check if DISPLAY is already set (running in a graphical environment)
