@@ -289,21 +289,11 @@ opts := &browser.ConnectOptions{
 
 ## 📝 Demo Files
 
-### Basic Examples
-- **`simple_demo.go`** - Basic navigation and screenshots
-- **`cmd/example/main.go`** - Production-ready complete example
+All demo files are located in `cmd/example/`:
 
-### Advanced Testing
-- **`detailed_debug_demo.go`** - Comprehensive monitoring and debugging
-- **`final_test_demo.go`** - Production configuration testing
-- **`cloudflare_demo.go`** - Cloudflare-specific bypass testing
-- **`smart_cloudflare_demo.go`** - Intelligent challenge handling
-- **`extension_demo.go`** - Chrome extensions support demonstration
-
-### Testing & Verification
-- **`test_anti_detection.go`** - Anti-detection feature verification
-- **`test_cloudflare.go`** - Real-world Cloudflare testing
-- **`test_working.go`** - Basic functionality testing
+- **`cmd/example/main.go`** - Complete example with all features (Turnstile, RealClick, Stealth)
+- **`cmd/example/simple_demo.go`** - Basic navigation and screenshots
+- **`cmd/example/cloudflare_demo.go`** - Cloudflare bypass testing
 
 ## 🧪 Testing
 
@@ -327,11 +317,10 @@ make test-coverage
 # Browser package tests
 go test -v ./pkg/browser -run TestConnect
 
-# Anti-detection verification
-go run test_anti_detection.go
-
-# Cloudflare bypass testing
-go run test_cloudflare.go
+# Run demo examples
+go run cmd/example/main.go
+go run cmd/example/simple_demo.go
+go run cmd/example/cloudflare_demo.go
 ```
 
 ### Benchmarks
@@ -462,8 +451,8 @@ sudo apt-get install xvfb
 ## 📖 Documentation
 
 - **[README.md](README.md)** - Main documentation (this file)
-- **[USAGE.md](USAGE.md)** - Chinese usage guide
-- **[ANTI_DETECTION_FIXES.md](ANTI_DETECTION_FIXES.md)** - Technical deep dive into anti-detection fixes
+- **[dom/ANTI_DETECTION_FIXES.md](dom/ANTI_DETECTION_FIXES.md)** - Technical deep dive into anti-detection fixes
+- **[dom/quick_setup_guide.md](dom/quick_setup_guide.md)** - Network fingerprint setup guide
 
 ## 🤝 Contributing
 
@@ -518,5 +507,3 @@ This software is intended for **educational and testing purposes only**. Users s
 ---
 
 **Made with ❤️ by the Go community**
-
-如果失败 → 提供备用方案（用户数据复制法）

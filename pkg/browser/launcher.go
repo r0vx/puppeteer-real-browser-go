@@ -15,7 +15,9 @@ import (
 )
 
 // ChromeLauncher handles Chrome process launching
-type ChromeLauncher struct{}
+type ChromeLauncher struct{
+	xvfb *XvfbManager
+}
 
 // NewChromeLauncher creates a new ChromeLauncher
 func NewChromeLauncher() *ChromeLauncher {
@@ -24,6 +26,12 @@ func NewChromeLauncher() *ChromeLauncher {
 
 // Launch starts a Chrome process with the given options
 func (cl *ChromeLauncher) Launch(ctx context.Context, opts *ConnectOptions) (*ChromeProcess, error) {
+	// Setup Xvfb on Linux if headless is false and Xvfb is not disabled
+	if err := cl.setupXvfb(opts); err != nil {
+		// Just print warning, don't fail
+		fmt.Printf("Warning: %v\n", err)
+	}
+
 	// Find Chrome executable
 	chromePath, err := cl.findChromeExecutable(opts)
 	if err != nil {
@@ -303,5 +311,61 @@ func (cp *ChromeProcess) IsRunning() bool {
 
 	// Check if process is still running by sending signal 0
 	err := syscall.Kill(cp.PID, 0)
+	return err == nil
+}
+
+// setupXvfb sets up Xvfb virtual display on Linux when headless is false
+func (cl *ChromeLauncher) setupXvfb(opts *ConnectOptions) error {
+	// Skip if Xvfb is explicitly disabled
+	if opts.DisableXvfb {
+		return nil
+	}
+
+	// Skip if headless is enabled (no display needed)
+	if opts.Headless != nil && opts.Headless != false {
+		return nil
+	}
+
+	// Check if we're on Linux
+	if !isLinux() {
+		return nil
+	}
+
+	// Check if Xvfb is installed
+	if !IsXvfbInstalled() {
+		return fmt.Errorf(GetXvfbWarningMessage())
+	}
+
+	// Check if DISPLAY is already set (running in a graphical environment)
+	if display := os.Getenv("DISPLAY"); display != "" {
+		return nil // Already have a display
+	}
+
+	// Start Xvfb
+	cl.xvfb = NewXvfbManager()
+	if err := cl.xvfb.Start(); err != nil {
+		return fmt.Errorf("failed to start Xvfb: %w", err)
+	}
+
+	return nil
+}
+
+// StopXvfb stops the Xvfb session if running
+func (cl *ChromeLauncher) StopXvfb() error {
+	if cl.xvfb != nil {
+		return cl.xvfb.Stop()
+	}
+	return nil
+}
+
+// isLinux checks if the current platform is Linux
+func isLinux() bool {
+	return os.Getenv("GOOS") == "linux" || 
+		(os.Getenv("GOOS") == "" && fileExists("/proc/version"))
+}
+
+// fileExists checks if a file exists
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
 	return err == nil
 }

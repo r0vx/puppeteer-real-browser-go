@@ -62,6 +62,7 @@ type CDPPage struct {
 	initialized      bool
 	requestHandler   RequestHandler
 	interceptEnabled bool
+	targetHandler    *TargetHandler
 }
 
 // initialize sets up the page with Runtime.Enable bypass (rebrowser-patches style)
@@ -69,7 +70,7 @@ func (p *CDPPage) initialize() error {
 	// CRITICAL: Completely avoid Runtime.Enable to prevent Cloudflare detection
 	// This is the core issue that was causing detection
 
-	return chromedp.Run(p.ctx,
+	err := chromedp.Run(p.ctx,
 		// Enable ONLY essential domains (NOT Runtime domain!)
 		chromedp.ActionFunc(func(ctx context.Context) error {
 			// Page domain for navigation
@@ -100,6 +101,18 @@ func (p *CDPPage) initialize() error {
 			return err
 		}),
 	)
+
+	if err != nil {
+		return err
+	}
+
+	// Start target handler to manage new pages/tabs (like original Node.js targetcreated event)
+	p.targetHandler = NewTargetHandler(p.allocCtx, p.opts)
+	if err := p.targetHandler.Start(p.ctx); err != nil {
+		return fmt.Errorf("failed to start target handler: %w", err)
+	}
+
+	return nil
 }
 
 // Navigate navigates to the specified URL
@@ -190,6 +203,11 @@ func (p *CDPPage) GetURL() (string, error) {
 
 // Close closes the page and cleans up resources
 func (p *CDPPage) Close() error {
+	// Stop target handler first
+	if p.targetHandler != nil {
+		p.targetHandler.Stop()
+	}
+	
 	if p.cancel != nil {
 		p.cancel()
 	}
@@ -266,10 +284,38 @@ func (p *CDPPage) setupProxyAuth() chromedp.Action {
 	}
 
 	return chromedp.ActionFunc(func(ctx context.Context) error {
-		// TODO: Implement proxy authentication
-		// This would require using CDP's Network.setUserAgentOverride or similar
+		// Enable fetch with auth request handling for proxy authentication
+		if err := fetch.Enable().WithHandleAuthRequests(true).Do(ctx); err != nil {
+			return fmt.Errorf("failed to enable Fetch with auth: %w", err)
+		}
+
+		// Listen for auth required events (proxy authentication challenges)
+		chromedp.ListenTarget(ctx, func(ev interface{}) {
+			if authEv, ok := ev.(*fetch.EventAuthRequired); ok {
+				go p.handleProxyAuth(ctx, authEv)
+			}
+		})
+
 		return nil
 	})
+}
+
+// handleProxyAuth handles proxy authentication challenges
+func (p *CDPPage) handleProxyAuth(ctx context.Context, ev *fetch.EventAuthRequired) {
+	if p.opts.Proxy == nil || p.opts.Proxy.Username == "" {
+		// No credentials, cancel the auth
+		fetch.ContinueWithAuth(ev.RequestID, &fetch.AuthChallengeResponse{
+			Response: fetch.AuthChallengeResponseResponseCancelAuth,
+		}).Do(ctx)
+		return
+	}
+
+	// Provide credentials for proxy authentication
+	fetch.ContinueWithAuth(ev.RequestID, &fetch.AuthChallengeResponse{
+		Response: fetch.AuthChallengeResponseResponseProvideCredentials,
+		Username: p.opts.Proxy.Username,
+		Password: p.opts.Proxy.Password,
+	}).Do(ctx)
 }
 
 // setupViewport configures the viewport
