@@ -294,6 +294,7 @@ All demo files are located in `cmd/example/`:
 - **`cmd/example/main.go`** - Complete example with all features (Turnstile, RealClick, Stealth)
 - **`cmd/example/simple_demo.go`** - Basic navigation and screenshots
 - **`cmd/example/cloudflare_demo.go`** - Cloudflare bypass testing
+- **`cmd/example/xvfb_demo.go`** - Xvfb virtual display demonstration (Linux)
 
 ## 🧪 Testing
 
