@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<style>
+		body { width: 250px; padding: 10px; }
+		.vault { background: #f0f8ff; padding: 8px; margin: 5px 0; }
+	</style>
+</head>
+<body>
+	<h3>Password Manager</h3>
+	<div class="vault">
+		<strong>🔐 Secure Vault</strong><br>
+		<small>3 passwords saved</small>
+	</div>
+	<button onclick="fillPassword()">Auto-fill</button>
+	<script>
+		function fillPassword() {
+			chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
+				console.log('Password auto-fill requested');
+			});
+		}
+	</script>
+</body>
+</html>

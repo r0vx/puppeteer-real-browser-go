@@ -1,0 +1,71 @@
+body {
+    background-color: #292929;
+}
+
+.container {
+    color: white;
+    height: 190px;
+    width: 300px
+}
+
+.inner-container {
+    align-items: center;
+    background-color: #36393e;
+    border-radius: 4px;
+    display: flex;
+    height: 190px;
+    width: 300px
+}
+
+.invisible-box {
+    display: flex;
+    flex-direction: column;
+    height: 150px;
+    margin-left: 15px;
+    width: 270px
+}
+
+.token-label {
+    color: #b9bbbd;
+    font-family: 'Secular One', sans-serif;
+    font-size: 15px;
+    margin-top: -1px
+}
+
+.unselectable {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    -khtml-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none
+}
+
+#submit {
+    background-color: #5865f2;
+    border: none;
+    border-radius: 4px;
+    color: #fcfdff;
+    font-family: 'Lato', sans-serif;
+    font-size: 13px;
+    height: 35px;
+    margin-top: 10px;
+    transition: all .1s ease-in
+}
+
+#token {
+    color: #d5d6d7;
+    background-color: #303338;
+    border: 1px solid #222427;
+    border-radius: 4px;
+    font-family: 'Lato', sans-serif;
+    height: 25px;
+    margin-top: -13px;
+    outline: none;
+    padding-left: 10px
+}
+
+#submit:hover {
+    background-color: #333da8;
+    cursor: pointer
+}

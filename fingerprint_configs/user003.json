@@ -1,0 +1,101 @@
+{
+  "user_id": "user003",
+  "screen": {
+    "width": 1280,
+    "height": 720,
+    "avail_width": 1280,
+    "avail_height": 686,
+    "color_depth": 24,
+    "pixel_depth": 24,
+    "device_pixel_ratio": 1.5
+  },
+  "browser": {
+    "user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
+    "language": "zh-CN",
+    "languages": [
+      "zh-CN",
+      "zh"
+    ],
+    "platform": "Linux x86_64",
+    "vendor": "Google Inc.",
+    "cookie_enabled": true,
+    "do_not_track": null,
+    "hardware_concurrency": 12,
+    "max_touch_points": 0,
+    "webdriver": null
+  },
+  "system": {
+    "os": "Windows",
+    "os_version": "11",
+    "architecture": "x64"
+  },
+  "webgl": {
+    "vendor": "Google Inc. (Intel)",
+    "renderer": "ANGLE (Intel, Intel(R) UHD Graphics 630 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+    "version": "WebGL 1.0 (OpenGL ES 2.0 Chromium)",
+    "shading_language_version": "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)",
+    "max_texture_size": 16384,
+    "max_renderbuffer_size": 16384
+  },
+  "audio": {
+    "sample_rate": 48000,
+    "max_channel_count": 8,
+    "number_of_inputs": 1,
+    "number_of_outputs": 0
+  },
+  "network": {
+    "effective_type": "slow-2g",
+    "downlink": 2,
+    "rtt": 200,
+    "save_data": false
+  },
+  "timezone": {
+    "offset": 60,
+    "timezone": "Europe/Berlin"
+  },
+  "canvas": {
+    "noise_level": 0.0015432611096010314,
+    "text_variance": 4
+  },
+  "fonts": {
+    "available_fonts": [
+      "Garamond",
+      "Franklin Gothic Medium",
+      "Lucida Console",
+      "Verdana",
+      "Consolas",
+      "Georgia",
+      "Arial Black",
+      "Trebuchet MS",
+      "Gill Sans",
+      "Impact",
+      "Segoe UI"
+    ],
+    "blocked_fonts": []
+  },
+  "plugins": {
+    "enabled_plugins": [
+      "PDF Viewer",
+      "Chrome PDF Viewer"
+    ],
+    "disabled_plugins": []
+  },
+  "battery": {
+    "charging": true,
+    "charging_time": 6601,
+    "discharging_time": null,
+    "level": 0.806550331336116
+  },
+  "media_devices": [
+    {
+      "kind": "audioinput",
+      "label": "Default - MacBook Pro Microphone",
+      "device_id": "587f5f8e98f2e09abb5765693fd31b5f"
+    },
+    {
+      "kind": "audiooutput",
+      "label": "Default - MacBook Pro Speakers",
+      "device_id": "cf7b87471f4b8d732c039b957a10140f"
+    }
+  ]
+}

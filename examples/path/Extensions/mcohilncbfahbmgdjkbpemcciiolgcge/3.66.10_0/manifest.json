@@ -1,0 +1,103 @@
+{
+   "action": {
+      "default_icon": {
+         "128": "static/images/icon-128.png",
+         "16": "static/images/icon-16.png",
+         "19": "static/images/icon-19.png",
+         "32": "static/images/icon-32.png",
+         "38": "static/images/icon-38.png",
+         "512": "static/images/icon-512.png",
+         "64": "static/images/icon-64.png"
+      },
+      "default_popup": "popup-init.html",
+      "default_title": "__MSG_wallet_intro_product_name__"
+   },
+   "author": "https://web3.okx.com",
+   "background": {
+      "service_worker": "scripts/background/background.js"
+   },
+   "commands": {
+      "_execute_action": {
+         "description": "Open popup",
+         "suggested_key": {
+            "chromeos": "Alt+Shift+O",
+            "linux": "Alt+Shift+O",
+            "mac": "Alt+Shift+O",
+            "windows": "Alt+Shift+O"
+         }
+      }
+   },
+   "content_scripts": [ {
+      "all_frames": true,
+      "js": [ "scripts/lib/globalthis.js", "scripts/lib/all.js", "scripts/lib/disable-console.js" ],
+      "matches": [ "http://*/*", "https://*/*" ],
+      "run_at": "document_start"
+   }, {
+      "all_frames": true,
+      "css": [ "scripts/lib/x.css" ],
+      "js": [ "scripts/lib/x.js" ],
+      "matches": [ "*://x.com/*", "*://twitter.com/*" ],
+      "run_at": "document_end"
+   }, {
+      "all_frames": true,
+      "css": [ "scripts/lib/solscan.css" ],
+      "js": [ "scripts/lib/solscan.js" ],
+      "matches": [ "*://solscan.io/*" ],
+      "run_at": "document_end"
+   }, {
+      "js": [ "scripts/lib/trezor.js" ],
+      "matches": [ "*://connect.trezor.io/*/popup.html" ]
+   } ],
+   "content_security_policy": {
+      "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'",
+      "sandbox": "sandbox allow-scripts allow-forms allow-popups allow-modals; script-src 'self' 'unsafe-inline' 'unsafe-eval'; child-src 'self'"
+   },
+   "default_locale": "en",
+   "description": "__MSG_wallet_intro_text_desc__",
+   "externally_connectable": {
+      "ids": [ "*" ],
+      "matches": [ "https://web3.okx.com/*" ]
+   },
+   "host_permissions": [ "http://*/*", "https://*/*" ],
+   "icons": {
+      "128": "static/images/icon-128.png",
+      "16": "static/images/icon-16.png",
+      "19": "static/images/icon-19.png",
+      "32": "static/images/icon-32.png",
+      "38": "static/images/icon-38.png",
+      "48": "static/images/icon-48.png",
+      "512": "static/images/icon-512.png",
+      "64": "static/images/icon-64.png"
+   },
+   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAnLQGK07fyAAjo3mK1lj0D+9mQkOtGJq5uQLbGmMFi8ZR1Mv5d6Gtct6V/hG5O8L1uhNeluRHdfL0HFRaRqdLS7gutUwd1ElXrf5DkywMqWD7MkC6UQ4FXy72Mp/pj34X+bfYiUhkKkbTwBlAUAeKSg81Hm225OW63zG/R72C7f3DVUEK13unn/EPTON+61BdvGyzqi9Bb28GACNV87w1PyQH9vsX+wjQ9ihZ11jKVhZ2cs3A+s5e2i9J9X3OQ/vqrIHVJEooeag3DURIwfGt/Pum0MtwA68yNnBBozviHxYq64hX4CiTPg3cy6FcqFzIcRTgB4S2XI0n1N0bp633YwIDAQAB",
+   "manifest_version": 3,
+   "minimum_chrome_version": "88",
+   "name": "__MSG_wallet_intro_product_name__",
+   "omnibox": {
+      "keyword": "okx"
+   },
+   "optional_permissions": [ "management" ],
+   "permissions": [ "storage", "unlimitedStorage", "activeTab", "notifications", "scripting", "contextMenus", "sidePanel", "system.cpu", "offscreen", "gcm" ],
+   "sandbox": {
+      "pages": [ "sandbox.html" ]
+   },
+   "short_name": "__MSG_wallet_intro_maintitle_product_name__",
+   "side_panel": {
+      "default_path": "sidepanel.html"
+   },
+   "update_url": "https://clients2.google.com/service/update2/crx",
+   "version": "3.66.10",
+   "web_accessible_resources": [ {
+      "matches": [ "\u003Call_urls>" ],
+      "resources": [ "scripts/lib/inpage.js" ]
+   }, {
+      "matches": [ "\u003Call_urls>" ],
+      "resources": [ "static/images/icon*" ]
+   }, {
+      "matches": [ "\u003Call_urls>" ],
+      "resources": [ "static/fonts/HarmonyOS_Sans_Web/*" ]
+   }, {
+      "matches": [ "*://x.com/*", "*://twitter.com/*", "*://solscan.io/*" ],
+      "resources": [ "scripts/lib/iconfont-*" ]
+   } ]
+}

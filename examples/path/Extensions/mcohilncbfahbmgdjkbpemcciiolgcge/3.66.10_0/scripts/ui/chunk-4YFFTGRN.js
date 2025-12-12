@@ -1,0 +1,7 @@
+import{B as d,H as g,X as p,da as c,fa as m,ra as u,u as a,y as l}from"./chunk-NQAVUB4Q.js";import{X as o}from"./chunk-QMENNGDH.js";import{d as y,s as T}from"./chunk-ANUO2YYF.js";import{c as C,f as W,o as e,q as t}from"./chunk-SHG7TIBL.js";var b=C((L,I)=>{e();t();var A=y(),f=T(),x="[object Boolean]";function _(i){return i===!0||i===!1||f(i)&&A(i)==x}I.exports=_});e();t();var r=(s=>(s.X="X",s.SOLSCAN="SOLSCAN",s))(r||{});e();t();e();t();e();t();e();t();e();t();e();t();e();t();e();t();var k=W(b());e();t();var S={["X"]:"TEMPORARILY_DISABLE_DOMAIN_X",["SOLSCAN"]:"TEMPORARILY_DISABLE_DOMAIN_SOLSCAN"};function ge(i){return S[i]??null}e();t();var Ce=["X","SOLSCAN"],We=[{id:"BLINK",type:"SWITCH",title:"wallet_extension_settings_toggle_blink",monitor:{click:m}},{id:"COIN_INFO_DIALOG",type:"ROUTE",title:"wallet_extension_settings_toggle_market_share",desc:"wallet_extension_settings_desc_market_share",route:`${o}?feature=${"COIN_INFO_DIALOG"}`,monitor:{click:d,byDomain:{["X"]:p,["SOLSCAN"]:a}}},{id:"TOKEN_TAG",type:"ROUTE",title:"wallet_extension_card_set_token_label",desc:"wallet_extension_card_set_token_label_desc",route:`${o}?feature=${"TOKEN_TAG"}`,monitor:{click:c,byDomain:{["X"]:u,["SOLSCAN"]:l}}},{type:"LINE"},{id:"SELECTION_ACTION_SHEET",type:"SWITCH",title:"wallet_extension_card_select_x_menu",monitor:{click:g}}];export{b as a,r as b,ge as c,Ce as d,We as e};
+
+window.inOKXExtension = true;
+window.inMiniApp = false;
+window.ASSETS_BUILD_TYPE = "publish";
+
+//# sourceMappingURL=chunk-4YFFTGRN.js.map

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"path/filepath"
 	"runtime"
 	"strings"
 )
@@ -98,6 +99,74 @@ func GetHeadlessFlags(headless interface{}) []string {
 	return flags
 }
 
+// GetDefaultExtensionPaths returns the default extension paths
+func GetDefaultExtensionPaths() []string {
+	// 返回默认的扩展路径 - 使用未打包扩展目录（ChromeDP要求）
+	return []string{
+		"examples/path/Extensions/kfjglmgfjedhhcddpfgfogkahmenikan/1.0_0",   // Discord Token Login (unpacked)
+		"examples/path/Extensions/mcohilncbfahbmgdjkbpemcciiolgcge/3.66.10_0", // OKX Wallet (unpacked)
+	}
+}
+
+// GetExtensionFlags returns flags for loading Chrome extensions
+func GetExtensionFlags(extensions []string) []string {
+	if len(extensions) == 0 {
+		return []string{}
+	}
+
+	var flags []string
+	var extensionPaths []string
+
+	for _, ext := range extensions {
+		if ext != "" {
+			extensionPaths = append(extensionPaths, ext)
+		}
+	}
+
+	if len(extensionPaths) > 0 {
+		// 当有扩展时，启用扩展功能
+		flags = append(flags, "--enable-extensions")
+		
+		// 关键发现：--disable-extensions-except 也支持逗号分隔的多个路径！
+		// 设置格式：--disable-extensions-except=/path/to/ext1,/path/to/ext2
+		extensionPathsStr := strings.Join(extensionPaths, ",")
+		flags = append(flags, "--disable-extensions-except="+extensionPathsStr)
+
+		// 加载扩展的方式 - 使用绝对路径
+		var absolutePaths []string
+		for _, path := range extensionPaths {
+			// 确保使用绝对路径
+			if !strings.HasPrefix(path, "/") {
+				// 如果是相对路径，转换为绝对路径
+				if absPath, err := filepath.Abs(path); err == nil {
+					absolutePaths = append(absolutePaths, absPath)
+				} else {
+					absolutePaths = append(absolutePaths, path)
+				}
+			} else {
+				absolutePaths = append(absolutePaths, path)
+			}
+		}
+
+		absolutePathsStr := strings.Join(absolutePaths, ",")
+		flags = append(flags, "--load-extension="+absolutePathsStr)
+
+		// 强制启用开发者模式相关标志
+		flags = append(flags, "--enable-extension-activity-logging")
+		flags = append(flags, "--enable-logging")
+
+		// 只保留必要的标志，移除可能与冲突解决矛盾的标志
+		flags = append(flags, "--allow-running-insecure-content")
+		flags = append(flags, "--disable-web-security")
+		flags = append(flags, "--allow-file-access-from-files")
+
+		// 确保没有冲突的标志
+		flags = append(flags, "--disable-default-apps")
+	}
+
+	return flags
+}
+
 // GetProxyFlags returns proxy configuration flags
 func GetProxyFlags(host, port string) []string {
 	if host != "" && port != "" {
@@ -108,11 +177,12 @@ func GetProxyFlags(host, port string) []string {
 	return []string{}
 }
 
-// MergeFlags combines multiple flag arrays and removes duplicates
+// MergeFlags combines multiple flag arrays and removes duplicates and conflicts
 func MergeFlags(flagArrays ...[]string) []string {
 	seen := make(map[string]bool)
 	var result []string
 
+	// 首先收集所有标志
 	for _, flags := range flagArrays {
 		for _, flag := range flags {
 			if !seen[flag] {
@@ -120,6 +190,46 @@ func MergeFlags(flagArrays ...[]string) []string {
 				result = append(result, flag)
 			}
 		}
+	}
+
+	// 处理冲突的标志
+	result = resolveConflictingFlags(result)
+
+	return result
+}
+
+// resolveConflictingFlags removes conflicting flags and keeps the most appropriate ones
+func resolveConflictingFlags(flags []string) []string {
+	hasEnableExtensions := false
+	hasLoadExtension := false
+
+	// 检查是否有扩展相关标志
+	for _, flag := range flags {
+		if flag == "--enable-extensions" {
+			hasEnableExtensions = true
+		}
+		if strings.HasPrefix(flag, "--load-extension=") {
+			hasLoadExtension = true
+		}
+	}
+
+	var result []string
+	for _, flag := range flags {
+		// 如果有扩展相关标志，跳过所有可能冲突的扩展disable标志
+		if hasEnableExtensions || hasLoadExtension {
+			if flag == "--disable-extensions" ||
+			   flag == "--disable-component-extensions-with-background-pages" ||
+			   flag == "--disable-background-timer-throttling" ||
+			   flag == "--disable-backgrounding-occluded-windows" ||
+			   flag == "--disable-extensions-file-access-check" ||
+			   flag == "--disable-extensions-http-throttling" ||
+			   flag == "--disable-component-update" ||
+			   flag == "--disable-extensions-install-verification" ||
+			   strings.Contains(flag, "--disable-features=") { // 移除可能包含扩展限制的features
+				continue
+			}
+		}
+		result = append(result, flag)
 	}
 
 	return result

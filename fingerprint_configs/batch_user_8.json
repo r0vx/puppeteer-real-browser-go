@@ -1,0 +1,110 @@
+{
+  "user_id": "batch_user_8",
+  "screen": {
+    "width": 2560,
+    "height": 1600,
+    "avail_width": 2560,
+    "avail_height": 1559,
+    "color_depth": 24,
+    "pixel_depth": 24,
+    "device_pixel_ratio": 1.5
+  },
+  "browser": {
+    "user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36",
+    "language": "en-US",
+    "languages": [
+      "en-US",
+      "en"
+    ],
+    "platform": "Linux x86_64",
+    "vendor": "Google Inc.",
+    "cookie_enabled": true,
+    "do_not_track": null,
+    "hardware_concurrency": 16,
+    "max_touch_points": 0,
+    "webdriver": null
+  },
+  "system": {
+    "os": "Windows",
+    "os_version": "10",
+    "architecture": "x64"
+  },
+  "webgl": {
+    "vendor": "Google Inc. (NVIDIA)",
+    "renderer": "ANGLE (NVIDIA, NVIDIA GeForce GTX 1660 Ti Direct3D11 vs_5_0 ps_5_0, D3D11)",
+    "version": "WebGL 1.0 (OpenGL ES 2.0 Chromium)",
+    "shading_language_version": "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)",
+    "max_texture_size": 16384,
+    "max_renderbuffer_size": 16384
+  },
+  "audio": {
+    "sample_rate": 44100,
+    "max_channel_count": 8,
+    "number_of_inputs": 1,
+    "number_of_outputs": 0
+  },
+  "network": {
+    "effective_type": "4g",
+    "downlink": 0.5,
+    "rtt": 500,
+    "save_data": false
+  },
+  "timezone": {
+    "offset": -480,
+    "timezone": "America/Los_Angeles"
+  },
+  "canvas": {
+    "noise_level": 0.003497410832295715,
+    "text_variance": 3
+  },
+  "fonts": {
+    "available_fonts": [
+      "Lucida Console",
+      "Gill Sans",
+      "Tahoma",
+      "Cambria",
+      "Courier New",
+      "Trebuchet MS",
+      "Helvetica",
+      "Franklin Gothic Medium",
+      "Comic Sans MS",
+      "Garamond",
+      "Segoe UI",
+      "Arial Black",
+      "Times New Roman",
+      "Impact",
+      "Calibri"
+    ],
+    "blocked_fonts": []
+  },
+  "plugins": {
+    "enabled_plugins": [
+      "PDF Viewer",
+      "Chrome PDF Viewer"
+    ],
+    "disabled_plugins": []
+  },
+  "battery": {
+    "charging": false,
+    "charging_time": null,
+    "discharging_time": 8032,
+    "level": 0.7901135639724367
+  },
+  "media_devices": [
+    {
+      "kind": "audioinput",
+      "label": "Default - MacBook Pro Microphone",
+      "device_id": "96e8c65e9cb078fffd44b40a0190661c"
+    },
+    {
+      "kind": "audiooutput",
+      "label": "Default - MacBook Pro Speakers",
+      "device_id": "43eff71a98b2ff2d4596ea4c5801a49f"
+    },
+    {
+      "kind": "videoinput",
+      "label": "FaceTime HD Camera",
+      "device_id": "0b21c65266df950a6c7a6886d5a03080"
+    }
+  ]
+}

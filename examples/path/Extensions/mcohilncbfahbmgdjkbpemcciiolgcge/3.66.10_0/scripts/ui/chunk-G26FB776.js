@@ -1,0 +1,7 @@
+import{a as S}from"./chunk-7SQRZDWM.js";import{d as y}from"./chunk-JSOLAK4X.js";import{b as d}from"./chunk-IEGAVAV7.js";import{ya as l}from"./chunk-QMENNGDH.js";import{U as h,jc as T}from"./chunk-QRHYK2TW.js";import{a as w}from"./chunk-532YJKK4.js";import{Tc as c,od as Z,uc as u}from"./chunk-QHXUL3YM.js";import{b as N}from"./chunk-OL67KS7C.js";import{f as a,o as f,q as g}from"./chunk-SHG7TIBL.js";f();g();var C=a(N()),b=a(T()),m=a(w());Z();var E=()=>{let{accountMap:t}=d();return t[u]},D=()=>{let t=(0,m.useHistory)(),n=E(),i=async o=>{let s={fromAddr:n},e={address:n,coinId:o},{info:r}=await h(e,s);return r||{}};return async({coinId:o,baseCoinId:s})=>{if([Number(s),Number(o)].includes(c)){let{accountId:e,nonce:r}=await i(o);if(r===0)return t.push(`${l}?coinId=${o}&nonce=${r}&accountId=${e}`),!1}return!0}},G=({nonce:t=0,address:n,accountId:i})=>{let o=(0,m.useHistory)(),s=(0,b.useDispatch)();return(0,C.useCallback)(async()=>{let r=Number(t),x={nonce:t,accountId:i,type:"changePubkey",from:n},{txHash:P,...p}=await y(x,n,u),{type:A}=p,I={txHash:P,signedTx:JSON.stringify({fastProcessing:null,tx:{nonce:r,...p},signature:null}),toAdr:"",txSource:2,coinAmount:0,fromAdr:n,serviceCharge:"0",coinId:c,extJson:JSON.stringify({type:A||"ChangePubKey",serviceChargeCoinId:c})};try{await s(S(I)),o.go(-1)}catch(K){console.log(K)}},[])};export{D as a,G as b};
+
+window.inOKXExtension = true;
+window.inMiniApp = false;
+window.ASSETS_BUILD_TYPE = "publish";
+
+//# sourceMappingURL=chunk-G26FB776.js.map

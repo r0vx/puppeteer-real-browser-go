@@ -1,0 +1,25 @@
+{
+  "profileName": "user_usa_windows",
+  "userAgent": "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/121.0",
+  "platform": "Linux",
+  "language": [
+    "ja-JP",
+    "ja",
+    "en"
+  ],
+  "timezone": "America/New_York",
+  "screen": {
+    "width": 1600,
+    "height": 900
+  },
+  "viewport": {
+    "width": 1523,
+    "height": 691
+  },
+  "webgl": {
+    "vendor": "Apple Inc.",
+    "renderer": "Mesa DRI Intel(R) UHD Graphics 620"
+  },
+  "canvas": "canvas_426748_86000",
+  "createdAt": "2025-08-07T03:52:17.628085+08:00"
+}

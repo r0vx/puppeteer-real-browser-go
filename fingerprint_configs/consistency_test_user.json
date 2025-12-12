@@ -1,0 +1,107 @@
+{
+  "user_id": "consistency_test_user",
+  "screen": {
+    "width": 1680,
+    "height": 1050,
+    "avail_width": 1680,
+    "avail_height": 1009,
+    "color_depth": 24,
+    "pixel_depth": 24,
+    "device_pixel_ratio": 1.5
+  },
+  "browser": {
+    "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0_0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36",
+    "language": "fr-FR",
+    "languages": [
+      "fr-FR",
+      "fr"
+    ],
+    "platform": "MacIntel",
+    "vendor": "Google Inc.",
+    "cookie_enabled": true,
+    "do_not_track": null,
+    "hardware_concurrency": 20,
+    "max_touch_points": 0,
+    "webdriver": null
+  },
+  "system": {
+    "os": "Windows",
+    "os_version": "10",
+    "architecture": "x64"
+  },
+  "webgl": {
+    "vendor": "WebKit",
+    "renderer": "WebKit WebGL",
+    "version": "WebGL 1.0 (OpenGL ES 2.0 Chromium)",
+    "shading_language_version": "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)",
+    "max_texture_size": 16384,
+    "max_renderbuffer_size": 16384
+  },
+  "audio": {
+    "sample_rate": 48000,
+    "max_channel_count": 2,
+    "number_of_inputs": 1,
+    "number_of_outputs": 0
+  },
+  "network": {
+    "effective_type": "2g",
+    "downlink": 25,
+    "rtt": 200,
+    "save_data": false
+  },
+  "timezone": {
+    "offset": 540,
+    "timezone": "Asia/Tokyo"
+  },
+  "canvas": {
+    "noise_level": 0.005544290535773576,
+    "text_variance": 5
+  },
+  "fonts": {
+    "available_fonts": [
+      "Lucida Console",
+      "Verdana",
+      "Segoe UI",
+      "Consolas",
+      "Garamond",
+      "Gill Sans",
+      "Helvetica",
+      "Arial",
+      "Impact",
+      "Franklin Gothic Medium",
+      "Tahoma",
+      "Cambria"
+    ],
+    "blocked_fonts": []
+  },
+  "plugins": {
+    "enabled_plugins": [
+      "PDF Viewer",
+      "Chrome PDF Viewer"
+    ],
+    "disabled_plugins": []
+  },
+  "battery": {
+    "charging": false,
+    "charging_time": null,
+    "discharging_time": 8973,
+    "level": 0.7241607648905825
+  },
+  "media_devices": [
+    {
+      "kind": "audioinput",
+      "label": "Default - MacBook Pro Microphone",
+      "device_id": "f2c188065f2c3afcc7bbeac9cbd8367c"
+    },
+    {
+      "kind": "audiooutput",
+      "label": "Default - MacBook Pro Speakers",
+      "device_id": "0ddc272750d0b831b5c42f2d69632f2d"
+    },
+    {
+      "kind": "videoinput",
+      "label": "FaceTime HD Camera",
+      "device_id": "ffa9f2dd03915d5486ca5baab83e2a12"
+    }
+  ]
+}

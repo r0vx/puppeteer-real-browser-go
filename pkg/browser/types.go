@@ -43,6 +43,16 @@ type ConnectOptions struct {
 
 	// Use custom CDP client to avoid Runtime.Enable leaks (experimental)
 	UseCustomCDP bool `json:"useCustomCDP"`
+
+	// Chrome extensions support
+	Extensions []string `json:"extensions"` // Paths to extension directories
+	
+	// Auto-load default extensions
+	AutoLoadDefaultExtensions bool `json:"autoLoadDefaultExtensions"` // Automatically load default extensions
+
+	// Profile/Account management
+	ProfileName   string `json:"profileName"`   // Unique profile name for this account
+	PersistProfile bool   `json:"persistProfile"` // Whether to persist user data or .crx files
 }
 
 // ProxyConfig contains proxy server configuration

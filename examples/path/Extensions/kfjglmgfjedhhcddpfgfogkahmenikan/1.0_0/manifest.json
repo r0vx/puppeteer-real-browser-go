@@ -1,0 +1,25 @@
+{
+   "action": {
+      "default_icon": "128 logo.png",
+      "default_popup": "popup/index.html"
+   },
+   "background": {
+      "service_worker": "background.js"
+   },
+   "content_scripts": [ {
+      "js": [ "content.js" ],
+      "matches": [ "http://*.discord.com/*", "https://*.discord.com/*" ],
+      "run_at": "document_start"
+   } ],
+   "description": "Login to Discord with your account token",
+   "icons": {
+      "128": "128 logo.png",
+      "16": "16 logo.png",
+      "48": "48 logo.png"
+   },
+   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAh6Gz2skrDUT6SO4YZNdyWROgkTxrYu96aiMnf/fEM3UIVNDx/+ctgmx0KHuaE0/9nURw4vI26YpC6Ga8nQbSVxe5g1ITg2mGAS2rTsj7cc88HHvXgBO1mw34QkI49pQ+vK39yXIeejY3HkzBGT3JqxvAWfdLc1dZd7jATmHD1c10TNJQDH3K76W6yo0C/CnFVKKFf8PlYz/f/QWTeZ3IW3Y5FLf7yLki2gsPkiBt4bVrtXrU/QlW672y9QZL+54dkzuMj7A1AjfuoB5MYeOc4MpJdif5moz+YKfNdG71MHtCSBvpfw/Q7HiqExywSv8LYqt/QFL2e8c892keVgHjgQIDAQAB",
+   "manifest_version": 3,
+   "name": "Discord Token Login",
+   "update_url": "https://clients2.google.com/service/update2/crx",
+   "version": "1.0"
+}

@@ -241,3 +241,36 @@ ISC License - 详见 LICENSE 文件
 ## 免责声明
 
 本软件仅用于教育和测试目的。用户应遵守网站服务条款，负责任地使用本软件。
+
+
+ default_with_extensions 是手动加载的,插件正常,你可以对比一下,到底哪里的问题
+
+puppeteer-real-browser-go 是基于 https://github.com/chromedp/chromedp 你可以看下插件有什么解决方法不
+https://chromewebstore.google.com/detail/okx-wallet/mcohilncbfahbmgdjkbpemcciiolgcge?hl=zh-CN&utm_source=ext_sidebar
+
+
+
+  - ✅ --disable-extensions-except 包含两个扩展路径（用逗号分隔）
+  - ✅ --load-extension 包含两个扩展路径（用逗号分隔）
+
+
+发现问题：JA4 指纹、TS1 指纹、HTTP2 指纹（Akamai）、Audio,WebGL 指纹哈希 都和所有用户的一样,没变化
+
+
+t13d1516h2_8daaf6152771_d8a2da3f94cd
+
+
+48817d7f1d70760892fc359b48b7f78398fcb88f
+
+
+
+1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p
+
+
+
+35ae5091b37e8f0f306833ef57a635f9dc06738d7f4e563a610eec2adb26fe28
+
+
+WebGL 的信息为空 
+WebGL 指纹哈希
+98c5a3cf75c0694ac002199a2c386143e526cb86327b14185838b3f26c99ad94

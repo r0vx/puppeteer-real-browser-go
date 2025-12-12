@@ -100,7 +100,7 @@ func main() {
 	fmt.Println("   - Some sites have rate limiting or IP-based blocks")
 
 	fmt.Println("\n⏳ Keeping browser open for 30 seconds for manual inspection...")
-	time.Sleep(30 * time.Second)
+	time.Sleep(30000 * time.Second)
 
 	fmt.Println("✅ Test completed!")
 }

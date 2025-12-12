@@ -1,0 +1,25 @@
+{
+  "profileName": "user_jp_mobile",
+  "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  "platform": "Windows",
+  "language": [
+    "ja-JP",
+    "ja",
+    "en"
+  ],
+  "timezone": "Europe/Berlin",
+  "screen": {
+    "width": 1366,
+    "height": 768
+  },
+  "viewport": {
+    "width": 1246,
+    "height": 536
+  },
+  "webgl": {
+    "vendor": "Apple Inc.",
+    "renderer": "ANGLE (NVIDIA GeForce GTX 1060 6GB Direct3D11 vs_5_0 ps_5_0)"
+  },
+  "canvas": "canvas_569631_828000",
+  "createdAt": "2025-08-07T03:52:17.628827+08:00"
+}

@@ -1,0 +1,7 @@
+import{db as s,ib as f}from"./chunk-QHXUL3YM.js";import{H as u,y as i}from"./chunk-MOTAOJVG.js";import{o as p}from"./chunk-XR4SQWL7.js";import{ka as t}from"./chunk-6M3PZK2X.js";import{b as g}from"./chunk-OL67KS7C.js";import{f as d,o,q as e}from"./chunk-SHG7TIBL.js";o();e();f();var B=async c=>{let{ethers:l}=await s();return new Promise((_,r)=>{new l.JsonRpcProvider(c).getNetwork().then(h=>{h?.chainId?_(!0):r()}).catch(()=>{r()})})};o();e();var n=d(g());u();o();e();var m={changeNetButton:"_changeNetButton_hc70c_1",exitRpcModeButton:"_exitRpcModeButton_hc70c_4",text:"_text_hc70c_14","font-logout":"_font-logout_hc70c_19",fontLogout:"_font-logout_hc70c_19"};var k=c=>{let{onRetry:l,onChangeNet:_,visible:r}=c;return r?n.default.createElement(p.Prompt,{visible:r,infoType:p.Prompt.INFO_TYPE.warn,title:i("developer_mode_network_toast_connect_failed"),text:i("developer_mode_network_toast_changenetwork"),hideCloseBtn:!0,alignBottom:!1,renderFooter:()=>n.default.createElement(n.default.Fragment,null,n.default.createElement(t,{block:!0,category:t.CATEGORY.fill,type:t.TYPE.highlight,onClick:l,size:t.SIZE.lg},i("developer_mode_network_btn_retry")),n.default.createElement(t,{block:!0,category:t.CATEGORY.outline,type:t.TYPE.primary,onClick:_,size:t.SIZE.lg,className:m.changeNetButton},i("developer_mode_network_btn_changenetwork")))}):null},O=k;export{B as a,O as b};
+
+window.inOKXExtension = true;
+window.inMiniApp = false;
+window.ASSETS_BUILD_TYPE = "publish";
+
+//# sourceMappingURL=chunk-CFQQ6KCO.js.map

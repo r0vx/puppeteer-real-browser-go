@@ -1,0 +1,173 @@
+{
+  "user_id": "advanced_user_001",
+  "screen": {
+    "width": 1920,
+    "height": 1200,
+    "avail_width": 1920,
+    "avail_height": 1151,
+    "color_depth": 24,
+    "pixel_depth": 24,
+    "device_pixel_ratio": 3
+  },
+  "browser": {
+    "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 12_0_0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
+    "language": "ja-JP",
+    "languages": [
+      "ja-JP",
+      "ja"
+    ],
+    "platform": "MacIntel",
+    "vendor": "Google Inc.",
+    "cookie_enabled": true,
+    "do_not_track": null,
+    "hardware_concurrency": 16,
+    "max_touch_points": 0,
+    "webdriver": null
+  },
+  "system": {
+    "os": "Windows",
+    "os_version": "10",
+    "architecture": "x64"
+  },
+  "webgl": {
+    "vendor": "Google Inc. (NVIDIA)",
+    "renderer": "ANGLE (NVIDIA, NVIDIA GeForce GTX 1660 Ti Direct3D11 vs_5_0 ps_5_0, D3D11)",
+    "version": "WebGL 1.0 (OpenGL ES 2.0 Chromium)",
+    "shading_language_version": "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)",
+    "max_texture_size": 16384,
+    "max_renderbuffer_size": 16384
+  },
+  "audio": {
+    "sample_rate": 44100,
+    "max_channel_count": 8,
+    "number_of_inputs": 1,
+    "number_of_outputs": 0
+  },
+  "network": {
+    "effective_type": "4g",
+    "downlink": 0.5,
+    "rtt": 50,
+    "save_data": false
+  },
+  "timezone": {
+    "offset": 60,
+    "timezone": "Europe/Berlin"
+  },
+  "canvas": {
+    "noise_level": 0.005853458209722107,
+    "text_variance": 4
+  },
+  "fonts": {
+    "available_fonts": [
+      "Cambria",
+      "Impact",
+      "Arial Black",
+      "Franklin Gothic Medium",
+      "Calibri",
+      "Georgia",
+      "Consolas",
+      "Times New Roman",
+      "Courier New",
+      "Gill Sans"
+    ],
+    "blocked_fonts": []
+  },
+  "plugins": {
+    "enabled_plugins": [
+      "PDF Viewer",
+      "Chrome PDF Viewer"
+    ],
+    "disabled_plugins": []
+  },
+  "battery": {
+    "charging": false,
+    "charging_time": null,
+    "discharging_time": 6020,
+    "level": 0.6726767774256158
+  },
+  "media_devices": [
+    {
+      "kind": "audioinput",
+      "label": "Default - MacBook Pro Microphone",
+      "device_id": "fe07fbe2a2bb594abbffc098877de21c"
+    },
+    {
+      "kind": "audiooutput",
+      "label": "Default - MacBook Pro Speakers",
+      "device_id": "7310a440b63f8c255a6f5a92a27172fc"
+    }
+  ],
+  "tls_config": {
+    "ja4": "t13d00080015_f490_18f2",
+    "ja3": "771,TLS_AES_128_GCM_SHA256-TLS_RSA_WITH_AES_256_GCM_SHA384-TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384-TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256-TLS_RSA_WITH_AES_256_CBC_SHA,server_name-ec_point_formats-supported_groups-session_ticket-encrypt_then_mac-extended_master_secret-signature_algorithms-supported_versions-cookie-psk_key_exchange_modes,X25519-secp256r1-secp384r1,0-1",
+    "tls_version": "TLS 1.3",
+    "cipher_suites": [
+      "TLS_AES_128_GCM_SHA256",
+      "TLS_RSA_WITH_AES_256_GCM_SHA384",
+      "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384",
+      "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256",
+      "TLS_RSA_WITH_AES_256_CBC_SHA",
+      "TLS_AES_256_GCM_SHA384",
+      "TLS_CHACHA20_POLY1305_SHA256",
+      "TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256"
+    ],
+    "extensions": [
+      "server_name",
+      "ec_point_formats",
+      "supported_groups",
+      "session_ticket",
+      "encrypt_then_mac",
+      "extended_master_secret",
+      "signature_algorithms",
+      "supported_versions",
+      "cookie",
+      "psk_key_exchange_modes",
+      "certificate_authorities",
+      "oid_filters",
+      "post_handshake_auth",
+      "signature_algorithms_cert",
+      "key_share"
+    ],
+    "elliptic_curves": [
+      "X25519",
+      "secp256r1",
+      "secp384r1"
+    ],
+    "ec_point_formats": [
+      "uncompressed"
+    ],
+    "signature_algs": [
+      "ecdsa_secp256r1_sha256",
+      "rsa_pss_rsae_sha256",
+      "rsa_pkcs1_sha256",
+      "ecdsa_secp384r1_sha384",
+      "rsa_pss_rsae_sha384",
+      "rsa_pkcs1_sha384",
+      "rsa_pss_rsae_sha512",
+      "rsa_pkcs1_sha512"
+    ]
+  },
+  "http2_config": {
+    "akamai": "10778:0:1352:118420:20045:16224843",
+    "settings": {
+      "SETTINGS_ENABLE_PUSH": 0,
+      "SETTINGS_HEADER_TABLE_SIZE": 10778,
+      "SETTINGS_INITIAL_WINDOW_SIZE": 118420,
+      "SETTINGS_MAX_CONCURRENT_STREAMS": 1352,
+      "SETTINGS_MAX_FRAME_SIZE": 20045,
+      "SETTINGS_MAX_HEADER_LIST_SIZE": 20102
+    },
+    "window_update": 16224843,
+    "header_priority": {
+      "depends_on": 5,
+      "exclusive": 0,
+      "weight": 231
+    },
+    "pseudo_headers": [
+      ":method",
+      ":authority",
+      ":scheme",
+      ":path"
+    ]
+  }
+}

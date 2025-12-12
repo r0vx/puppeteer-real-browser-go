@@ -16,6 +16,7 @@ A Go implementation of puppeteer-real-browser that prevents detection as a bot i
 - 📱 **Headless Support**: Full headless mode support
 - ⚡ **Custom CDP Client**: Avoids Runtime.Enable leaks for maximum stealth
 - 🎯 **Dual Architecture**: Standard chromedp + Custom CDP client options
+- 🧩 **Chrome Extensions**: Full support for Chrome extensions and plugins
 - 📊 **Performance Optimized**: 50% less memory usage vs Node.js version
 
 ## 🔥 Key Advantages Over Original
@@ -166,6 +167,9 @@ type ConnectOptions struct {
 
     // Use custom CDP client (recommended for maximum stealth)
     UseCustomCDP bool `json:"useCustomCDP"`
+
+    // Chrome extensions support
+    Extensions []string `json:"extensions"` // Paths to extension directories
 }
 ```
 
@@ -190,6 +194,19 @@ opts := &browser.ConnectOptions{
         "chromePath":   "/path/to/chrome",
         "userDataDir":  "/path/to/userdata",
     },
+}
+```
+
+### Chrome Extensions Support
+
+```go
+opts := &browser.ConnectOptions{
+    Extensions: []string{
+        "/path/to/extension1",      // Unpacked extension directory
+        "/path/to/extension2.crx",  // Packed extension file
+        "./my_extensions/adblocker",
+    },
+    Headless: false, // Extensions require visible browser
 }
 ```
 
@@ -281,6 +298,7 @@ opts := &browser.ConnectOptions{
 - **`final_test_demo.go`** - Production configuration testing
 - **`cloudflare_demo.go`** - Cloudflare-specific bypass testing
 - **`smart_cloudflare_demo.go`** - Intelligent challenge handling
+- **`extension_demo.go`** - Chrome extensions support demonstration
 
 ### Testing & Verification
 - **`test_anti_detection.go`** - Anti-detection feature verification
@@ -500,3 +518,5 @@ This software is intended for **educational and testing purposes only**. Users s
 ---
 
 **Made with ❤️ by the Go community**
+
+如果失败 → 提供备用方案（用户数据复制法）

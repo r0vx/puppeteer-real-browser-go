@@ -1,0 +1,126 @@
+{
+  "user_id": "user002_clone",
+  "screen": {
+    "width": 1920,
+    "height": 1200,
+    "avail_width": 1920,
+    "avail_height": 1155,
+    "color_depth": 24,
+    "pixel_depth": 24,
+    "device_pixel_ratio": 1.5
+  },
+  "browser": {
+    "user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
+    "language": "en-US",
+    "languages": [
+      "en-US",
+      "en"
+    ],
+    "platform": "Linux x86_64",
+    "vendor": "Google Inc.",
+    "cookie_enabled": true,
+    "do_not_track": null,
+    "hardware_concurrency": 12,
+    "max_touch_points": 0,
+    "webdriver": null
+  },
+  "system": {
+    "os": "Windows",
+    "os_version": "10",
+    "architecture": "x64"
+  },
+  "webgl": {
+    "vendor": "Google Inc. (NVIDIA)",
+    "renderer": "ANGLE (NVIDIA, NVIDIA GeForce GTX 1660 Ti Direct3D11 vs_5_0 ps_5_0, D3D11)",
+    "version": "WebGL 1.0 (OpenGL ES 2.0 Chromium)",
+    "shading_language_version": "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)",
+    "max_texture_size": 16384,
+    "max_renderbuffer_size": 16384
+  },
+  "audio": {
+    "sample_rate": 96000,
+    "max_channel_count": 4,
+    "number_of_inputs": 1,
+    "number_of_outputs": 0
+  },
+  "network": {
+    "effective_type": "3g",
+    "downlink": 0.5,
+    "rtt": 300,
+    "save_data": false
+  },
+  "timezone": {
+    "offset": 540,
+    "timezone": "Asia/Tokyo"
+  },
+  "canvas": {
+    "noise_level": 0.003515940638027031,
+    "text_variance": 1
+  },
+  "fonts": {
+    "available_fonts": [
+      "Courier New",
+      "Impact",
+      "Times New Roman",
+      "Calibri",
+      "Comic Sans MS",
+      "Georgia",
+      "Franklin Gothic Medium",
+      "Cambria",
+      "Verdana",
+      "Tahoma",
+      "Arial",
+      "Arial Black",
+      "Garamond",
+      "Gill Sans"
+    ],
+    "blocked_fonts": []
+  },
+  "plugins": {
+    "enabled_plugins": [
+      "PDF Viewer",
+      "Chrome PDF Viewer"
+    ],
+    "disabled_plugins": []
+  },
+  "battery": {
+    "charging": false,
+    "charging_time": null,
+    "discharging_time": 8978,
+    "level": 0.34619916099644876
+  },
+  "media_devices": [
+    {
+      "kind": "audioinput",
+      "label": "Default - MacBook Pro Microphone",
+      "device_id": "205929cc5f382d992ab0a7d5d5661703"
+    },
+    {
+      "kind": "audiooutput",
+      "label": "Default - MacBook Pro Speakers",
+      "device_id": "52bcc3879d1d806dbbdaeb2a5feaa4be"
+    },
+    {
+      "kind": "videoinput",
+      "label": "FaceTime HD Camera",
+      "device_id": "f9d88deffe842f964f498f65946361c1"
+    }
+  ],
+  "tls_config": {
+    "ja4": "",
+    "ja3": "",
+    "tls_version": "",
+    "cipher_suites": null,
+    "extensions": null,
+    "elliptic_curves": null,
+    "ec_point_formats": null,
+    "signature_algs": null
+  },
+  "http2_config": {
+    "akamai": "",
+    "settings": null,
+    "window_update": 0,
+    "header_priority": null,
+    "pseudo_headers": null
+  }
+}

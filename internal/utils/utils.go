@@ -119,3 +119,27 @@ func GetUserDataDir() (string, error) {
 
 	return userDataDir, nil
 }
+
+// GetPersistentUserDataDir returns a persistent user data directory for a specific profile
+func GetPersistentUserDataDir(profileName string) (string, error) {
+	if profileName == "" {
+		profileName = "default"
+	}
+
+	// 使用用户主目录或应用数据目录
+	var baseDir string
+	if homeDir, err := os.UserHomeDir(); err == nil {
+		baseDir = fmt.Sprintf("%s/.puppeteer-real-browser-go/profiles", homeDir)
+	} else {
+		// 回退到临时目录的子目录
+		baseDir = fmt.Sprintf("%s/puppeteer-real-browser-go/profiles", os.TempDir())
+	}
+
+	userDataDir := fmt.Sprintf("%s/%s", baseDir, profileName)
+
+	if err := os.MkdirAll(userDataDir, 0755); err != nil {
+		return "", fmt.Errorf("failed to create persistent user data directory: %w", err)
+	}
+
+	return userDataDir, nil
+}

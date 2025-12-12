@@ -42,6 +42,13 @@ func (cl *ChromeLauncher) Launch(ctx context.Context, opts *ConnectOptions) (*Ch
 		return nil, fmt.Errorf("failed to build Chrome flags: %w", err)
 	}
 
+	// DEBUG: 打印实际的Chrome启动参数 (可选)
+	// fmt.Printf("🔧 Chrome启动路径: %s\n", chromePath)
+	// fmt.Printf("🔧 Chrome启动参数:\n")
+	// for i, flag := range flags {
+	//	fmt.Printf("  [%d] %s\n", i, flag)
+	// }
+
 	// Create Chrome command
 	cmd := exec.CommandContext(ctx, chromePath, flags...)
 
@@ -67,6 +74,7 @@ func (cl *ChromeLauncher) Launch(ctx context.Context, opts *ConnectOptions) (*Ch
 		chrome.Kill()
 		return nil, fmt.Errorf("Chrome failed to start properly: %w", err)
 	}
+
 
 	return chrome, nil
 }
@@ -104,6 +112,29 @@ func (cl *ChromeLauncher) buildChromeFlags(opts *ConnectOptions, port int) ([]st
 			proxyFlags := config.GetProxyFlags(opts.Proxy.Host, opts.Proxy.Port)
 			flags = append(flags, proxyFlags...)
 		}
+
+		// Add extension flags if configured
+		extensions := opts.Extensions
+		
+		// 如果启用自动加载默认扩展，添加到临时加载列表
+		if opts.AutoLoadDefaultExtensions {
+			defaultExtensions := config.GetDefaultExtensionPaths()
+			extensions = append(extensions, defaultExtensions...)
+		}
+		
+		// 如果启用了自动加载默认扩展，需要确保添加--enable-extensions
+		var extensionFlags []string
+		if opts.AutoLoadDefaultExtensions || len(extensions) > 0 {
+			extensionFlags = append(extensionFlags, "--enable-extensions")
+			// 只有当有临时扩展路径时才添加--load-extension
+			if len(extensions) > 0 {
+				additionalFlags := config.GetExtensionFlags(extensions)
+				extensionFlags = append(extensionFlags, additionalFlags...)
+			}
+		} else {
+			extensionFlags = config.GetExtensionFlags(extensions)
+		}
+		flags = append(flags, extensionFlags...)
 	} else {
 		// Start with default flags
 		defaultFlags := config.DefaultChromeFlags()
@@ -137,12 +168,35 @@ func (cl *ChromeLauncher) buildChromeFlags(opts *ConnectOptions, port int) ([]st
 		}
 		filteredFlags = append(filteredFlags, "--user-data-dir="+userDataDir)
 
+		// 处理扩展
+		extensions := opts.Extensions
+		
+		// 如果启用自动加载默认扩展，添加到临时加载列表
+		if opts.AutoLoadDefaultExtensions {
+			defaultExtensions := config.GetDefaultExtensionPaths()
+			extensions = append(extensions, defaultExtensions...)
+		}
+		
+		// 处理扩展标志
+		var extensionFlags []string
+		if opts.AutoLoadDefaultExtensions || len(extensions) > 0 {
+			extensionFlags = append(extensionFlags, "--enable-extensions")
+			// 只有当有临时扩展路径时才添加--load-extension
+			if len(extensions) > 0 {
+				additionalFlags := config.GetExtensionFlags(extensions)
+				extensionFlags = append(extensionFlags, additionalFlags...)
+			}
+		} else {
+			extensionFlags = config.GetExtensionFlags(extensions)
+		}
+		
 		// Merge all flags
 		flags = config.MergeFlags(
 			filteredFlags,
 			stealthFlags,
 			opts.Args,
 			config.GetHeadlessFlags(opts.Headless),
+			extensionFlags,
 		)
 
 		// Add proxy flags if configured
@@ -157,12 +211,19 @@ func (cl *ChromeLauncher) buildChromeFlags(opts *ConnectOptions, port int) ([]st
 
 // getUserDataDir gets or creates user data directory
 func (cl *ChromeLauncher) getUserDataDir(opts *ConnectOptions) (string, error) {
+	// 1. 优先使用自定义配置
 	if opts.CustomConfig != nil {
 		if userDataDir, ok := opts.CustomConfig["userDataDir"].(string); ok && userDataDir != "" {
 			return userDataDir, nil
 		}
 	}
 
+	// 2. 如果启用了持久化配置，使用持久化目录
+	if opts.PersistProfile && opts.ProfileName != "" {
+		return utils.GetPersistentUserDataDir(opts.ProfileName)
+	}
+
+	// 3. 默认使用临时目录
 	return utils.GetUserDataDir()
 }
 
