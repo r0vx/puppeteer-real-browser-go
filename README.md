@@ -295,6 +295,7 @@ All demo files are located in `cmd/example/`:
 - **`cmd/example/simple_demo.go`** - Basic navigation and screenshots
 - **`cmd/example/cloudflare_demo.go`** - Cloudflare bypass testing
 - **`cmd/example/xvfb_demo.go`** - Xvfb virtual display demonstration (Linux)
+- **`cmd/example/proxy_demo.go`** - HTTP proxy configuration and testing
 
 ## 🧪 Testing
 
