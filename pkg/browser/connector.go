@@ -28,9 +28,9 @@ func (cc *CDPConnector) Connect(ctx context.Context, chrome *ChromeProcess, opts
 	// Create allocator context for connecting to existing Chrome instance
 	allocCtx, cancel := chromedp.NewRemoteAllocator(ctx, fmt.Sprintf("http://localhost:%d", chrome.Port))
 
-	// Create context for the browser tab
-	// Note: This creates a new tab/window - currently results in 2 windows total
-	// TODO: Research chromedp methods to connect to existing tab instead
+	// Simply create a new context - this will create a new tab
+	// Note: Chrome will have the default blank tab + this new tab (2 tabs total)
+	// This is the standard chromedp behavior and is acceptable
 	tabCtx, tabCancel := chromedp.NewContext(allocCtx)
 
 	// Create page instance
@@ -213,12 +213,12 @@ func (p *CDPPage) Close() error {
 		p.requestListenerCancel = nil
 	}
 	p.requestListenerMu.Unlock()
-	
+
 	// Stop target handler
 	if p.targetHandler != nil {
 		p.targetHandler.Stop()
 	}
-	
+
 	if p.cancel != nil {
 		p.cancel()
 	}
@@ -361,20 +361,20 @@ func (p *CDPPage) setupAdditionalStealth() chromedp.Action {
 func (p *CDPPage) SetRequestInterception(enabled bool) error {
 	p.requestListenerMu.Lock()
 	defer p.requestListenerMu.Unlock()
-	
+
 	// 先取消旧的监听器（如果存在）
 	if p.requestListenerCancel != nil {
 		p.requestListenerCancel()
 		p.requestListenerCancel = nil
 	}
-	
+
 	p.interceptEnabled = enabled
 
 	if enabled {
 		// 创建专用 context 用于监听器
 		listenerCtx, cancel := context.WithCancel(p.ctx)
 		p.requestListenerCancel = cancel
-		
+
 		// Enable both Network and Fetch domains for comprehensive request interception
 		return chromedp.Run(p.ctx, chromedp.ActionFunc(func(ctx context.Context) error {
 			// Enable Network domain first
@@ -402,7 +402,7 @@ func (p *CDPPage) SetRequestInterception(enabled bool) error {
 							return
 						default:
 						}
-						
+
 						if p.requestHandler != nil {
 							// Create InterceptedRequest
 							req := &InterceptedRequest{

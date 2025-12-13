@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>浏览器指纹收集器</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        .container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            padding: 40px;
+            max-width: 1000px;
+            width: 100%;
+        }
+        h1 {
+            color: #667eea;
+            margin-bottom: 10px;
+            font-size: 2.5em;
+        }
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 1.1em;
+        }
+        .status {
+            background: #f0f0f0;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            font-weight: bold;
+        }
+        .status.collecting { background: #fff3cd; color: #856404; }
+        .status.success { background: #d4edda; color: #155724; }
+        .status.error { background: #f8d7da; color: #721c24; }
+        
+        .section {
+            margin: 20px 0;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 10px;
+        }
+        .section h3 {
+            color: #667eea;
+            margin-bottom: 15px;
+            font-size: 1.3em;
+        }
+        .info-item {
+            display: flex;
+            padding: 8px 0;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        .info-item:last-child { border-bottom: none; }
+        .info-label {
+            font-weight: bold;
+            min-width: 200px;
+            color: #555;
+        }
+        .info-value {
+            color: #333;
+            word-break: break-all;
+        }
+        
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 15px 40px;
+            border-radius: 50px;
+            font-size: 1.1em;
+            cursor: pointer;
+            transition: transform 0.2s;
+            margin: 10px 5px;
+        }
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
+        }
+        button:active { transform: translateY(0); }
+        
+        #jsonOutput {
+            background: #2d2d2d;
+            color: #f8f8f2;
+            padding: 20px;
+            border-radius: 10px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            max-height: 400px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        
+        .canvas-container {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+        canvas {
+            border: 2px solid #667eea;
+            border-radius: 10px;
+        }
+        
+        .progress {
+            width: 100%;
+            height: 8px;
+            background: #e0e0e0;
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 20px 0;
+        }
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            width: 0%;
+            transition: width 0.3s;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 浏览器指纹收集器</h1>
+        <p class="subtitle">自动收集完整的浏览器指纹信息，用于反检测配置</p>
+        
+        <div id="status" class="status">准备收集指纹数据...</div>
+        
+        <div class="progress">
+            <div id="progressBar" class="progress-bar"></div>
+        </div>
+        
+        <div style="text-align: center; margin: 20px 0;">
+            <button onclick="collectFingerprint()">🚀 开始收集指纹</button>
+            <button onclick="downloadJSON()">💾 下载JSON配置</button>
+            <button onclick="copyToClipboard()">📋 复制到剪贴板</button>
+        </div>
+        
+        <div id="results" style="display: none;">
+            <div class="section">
+                <h3>🌐 浏览器基础信息</h3>
+                <div id="browserInfo"></div>
+            </div>
+            
+            <div class="section">
+                <h3>🖥️ 屏幕信息</h3>
+                <div id="screenInfo"></div>
+            </div>
+            
+            <div class="section">
+                <h3>🎨 Canvas 指纹</h3>
+                <div class="canvas-container">
+                    <canvas id="canvas2d" width="300" height="150"></canvas>
+                    <canvas id="canvasWebGL" width="300" height="150"></canvas>
+                </div>
+                <div id="canvasInfo"></div>
+            </div>
+            
+            <div class="section">
+                <h3>🔊 Audio 指纹</h3>
+                <div id="audioInfo"></div>
+            </div>
+            
+            <div class="section">
+                <h3>📄 完整JSON配置</h3>
+                <div id="jsonOutput"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let fingerprintData = {};
+        let progress = 0;
+
+        function updateProgress(percent) {
+            progress = percent;
+            document.getElementById('progressBar').style.width = percent + '%';
+        }
+
+        function updateStatus(message, type = 'collecting') {
+            const status = document.getElementById('status');
+            status.textContent = message;
+            status.className = 'status ' + type;
+        }
+
+        function addInfoItem(containerId, label, value) {
+            const container = document.getElementById(containerId);
+            const item = document.createElement('div');
+            item.className = 'info-item';
+            item.innerHTML = `
+                <span class="info-label">${label}:</span>
+                <span class="info-value">${value}</span>
+            `;
+            container.appendChild(item);
+        }
+
+        async function collectFingerprint() {
+            updateStatus('🔄 正在收集指纹数据...', 'collecting');
+            updateProgress(0);
+            
+            document.getElementById('results').style.display = 'block';
+            fingerprintData = {
+                user_id: 'collected_' + Date.now(),
+                collected_at: new Date().toISOString(),
+                screen: {},
+                browser: {},
+                system: {},
+                webgl: {},
+                audio: {},
+                canvas: {},
+                fonts: {},
+                plugins: {},
+                battery: {},
+                media_devices: [],
+                network: {},
+                timezone: {}
+            };
+
+            // 1. 收集基础浏览器信息 (10%)
+            updateProgress(10);
+            collectBrowserInfo();
+
+            // 2. 收集屏幕信息 (20%)
+            updateProgress(20);
+            collectScreenInfo();
+
+            // 3. 收集WebGL信息 (40%)
+            updateProgress(40);
+            await collectWebGLInfo();
+
+            // 4. 收集Canvas指纹 (60%)
+            updateProgress(60);
+            collectCanvasFingerprint();
+
+            // 5. 收集Audio指纹 (80%)
+            updateProgress(80);
+            await collectAudioFingerprint();
+
+            // 6. 收集其他信息 (90%)
+            updateProgress(90);
+            await collectOtherInfo();
+
+            // 完成
+            updateProgress(100);
+            updateStatus('✅ 指纹收集完成！', 'success');
+
+            // 显示JSON
+            document.getElementById('jsonOutput').textContent = 
+                JSON.stringify(fingerprintData, null, 2);
+        }
+
+        function collectBrowserInfo() {
+            const browserInfo = document.getElementById('browserInfo');
+            browserInfo.innerHTML = '';
+
+            fingerprintData.browser = {
+                user_agent: navigator.userAgent,
+                language: navigator.language,
+                languages: navigator.languages || [navigator.language],
+                platform: navigator.platform,
+                vendor: navigator.vendor,
+                cookie_enabled: navigator.cookieEnabled,
+                do_not_track: navigator.doNotTrack,
+                hardware_concurrency: navigator.hardwareConcurrency,
+                max_touch_points: navigator.maxTouchPoints,
+                webdriver: navigator.webdriver
+            };
+
+            addInfoItem('browserInfo', 'User Agent', navigator.userAgent);
+            addInfoItem('browserInfo', 'Platform', navigator.platform);
+            addInfoItem('browserInfo', 'Language', navigator.language);
+            addInfoItem('browserInfo', 'CPU Cores', navigator.hardwareConcurrency);
+            addInfoItem('browserInfo', 'WebDriver', navigator.webdriver);
+        }
+
+        function collectScreenInfo() {
+            const screenInfo = document.getElementById('screenInfo');
+            screenInfo.innerHTML = '';
+
+            fingerprintData.screen = {
+                width: screen.width,
+                height: screen.height,
+                avail_width: screen.availWidth,
+                avail_height: screen.availHeight,
+                color_depth: screen.colorDepth,
+                pixel_depth: screen.pixelDepth,
+                device_pixel_ratio: window.devicePixelRatio
+            };
+
+            addInfoItem('screenInfo', '分辨率', `${screen.width} x ${screen.height}`);
+            addInfoItem('screenInfo', '可用分辨率', `${screen.availWidth} x ${screen.availHeight}`);
+            addInfoItem('screenInfo', '颜色深度', `${screen.colorDepth} bit`);
+            addInfoItem('screenInfo', '设备像素比', window.devicePixelRatio);
+        }
+
+        async function collectWebGLInfo() {
+            const canvas = document.getElementById('canvasWebGL');
+            const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+            
+            if (!gl) {
+                fingerprintData.webgl = { supported: false };
+                return;
+            }
+
+            // 绘制测试图形
+            gl.clearColor(0.5, 0.7, 0.9, 1.0);
+            gl.clear(gl.COLOR_BUFFER_BIT);
+            gl.enable(gl.DEPTH_TEST);
+
+            const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+            
+            fingerprintData.webgl = {
+                vendor: gl.getParameter(gl.VENDOR),
+                renderer: gl.getParameter(gl.RENDERER),
+                version: gl.getParameter(gl.VERSION),
+                shading_language_version: gl.getParameter(gl.SHADING_LANGUAGE_VERSION),
+                max_texture_size: gl.getParameter(gl.MAX_TEXTURE_SIZE),
+                max_renderbuffer_size: gl.getParameter(gl.MAX_RENDERBUFFER_SIZE),
+                unmasked_vendor: debugInfo ? gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL) : 'N/A',
+                unmasked_renderer: debugInfo ? gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) : 'N/A'
+            };
+
+            addInfoItem('canvasInfo', 'WebGL Vendor', fingerprintData.webgl.vendor);
+            addInfoItem('canvasInfo', 'WebGL Renderer', fingerprintData.webgl.renderer);
+            addInfoItem('canvasInfo', 'Unmasked Vendor', fingerprintData.webgl.unmasked_vendor);
+            addInfoItem('canvasInfo', 'Unmasked Renderer', fingerprintData.webgl.unmasked_renderer);
+        }
+
+        function collectCanvasFingerprint() {
+            const canvas = document.getElementById('canvas2d');
+            const ctx = canvas.getContext('2d');
+            
+            // 绘制测试图形
+            ctx.fillStyle = 'rgb(102, 126, 234)';
+            ctx.fillRect(10, 10, 200, 50);
+            
+            ctx.font = '18px Arial';
+            ctx.fillStyle = 'rgb(255, 255, 255)';
+            ctx.fillText('Canvas Fingerprint Test 🎨', 20, 40);
+            
+            ctx.beginPath();
+            ctx.arc(250, 75, 40, 0, 2 * Math.PI);
+            ctx.strokeStyle = 'rgb(118, 75, 162)';
+            ctx.lineWidth = 3;
+            ctx.stroke();
+
+            const dataURL = canvas.toDataURL();
+            
+            // 计算哈希
+            let hash = 0;
+            for (let i = 0; i < dataURL.length; i++) {
+                hash = ((hash << 5) - hash) + dataURL.charCodeAt(i);
+                hash = hash & hash;
+            }
+
+            fingerprintData.canvas = {
+                data_url_hash: hash.toString(16),
+                data_url_length: dataURL.length,
+                noise_level: 0.005 + Math.random() * 0.005,
+                text_variance: Math.floor(Math.random() * 5) + 1
+            };
+
+            addInfoItem('canvasInfo', 'Canvas Hash', fingerprintData.canvas.data_url_hash);
+            addInfoItem('canvasInfo', 'Data URL Length', fingerprintData.canvas.data_url_length);
+        }
+
+        async function collectAudioFingerprint() {
+            try {
+                const AudioContext = window.AudioContext || window.webkitAudioContext;
+                if (!AudioContext) {
+                    fingerprintData.audio = { supported: false };
+                    return;
+                }
+
+                const context = new AudioContext();
+                const oscillator = context.createOscillator();
+                const analyser = context.createAnalyser();
+                const gainNode = context.createGain();
+                const scriptProcessor = context.createScriptProcessor(4096, 1, 1);
+
+                gainNode.gain.value = 0;
+                oscillator.connect(analyser);
+                analyser.connect(scriptProcessor);
+                scriptProcessor.connect(gainNode);
+                gainNode.connect(context.destination);
+
+                oscillator.start(0);
+
+                const audioHash = await new Promise((resolve) => {
+                    scriptProcessor.onaudioprocess = function(event) {
+                        const output = event.outputBuffer.getChannelData(0);
+                        let hash = 0;
+                        for (let i = 0; i < output.length; i++) {
+                            hash += Math.abs(output[i]);
+                        }
+                        oscillator.stop();
+                        scriptProcessor.disconnect();
+                        resolve(hash.toString());
+                    };
+                });
+
+                fingerprintData.audio = {
+                    sample_rate: context.sampleRate,
+                    max_channel_count: context.destination.maxChannelCount,
+                    number_of_inputs: context.destination.numberOfInputs,
+                    number_of_outputs: context.destination.numberOfOutputs,
+                    audio_hash: audioHash
+                };
+
+                addInfoItem('audioInfo', 'Sample Rate', context.sampleRate + ' Hz');
+                addInfoItem('audioInfo', 'Max Channels', context.destination.maxChannelCount);
+                addInfoItem('audioInfo', 'Audio Hash', audioHash.substring(0, 20) + '...');
+
+                context.close();
+            } catch (error) {
+                fingerprintData.audio = { error: error.message };
+            }
+        }
+
+        async function collectOtherInfo() {
+            // 时区
+            fingerprintData.timezone = {
+                offset: new Date().getTimezoneOffset(),
+                timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+            };
+
+            // 插件
+            fingerprintData.plugins = {
+                enabled_plugins: Array.from(navigator.plugins).map(p => p.name),
+                disabled_plugins: []
+            };
+
+            // 字体检测
+            fingerprintData.fonts = {
+                available_fonts: detectFonts(),
+                blocked_fonts: []
+            };
+
+            // 网络信息
+            if (navigator.connection) {
+                fingerprintData.network = {
+                    effective_type: navigator.connection.effectiveType,
+                    downlink: navigator.connection.downlink,
+                    rtt: navigator.connection.rtt,
+                    save_data: navigator.connection.saveData
+                };
+            }
+
+            // 电池信息
+            if (navigator.getBattery) {
+                try {
+                    const battery = await navigator.getBattery();
+                    fingerprintData.battery = {
+                        charging: battery.charging,
+                        charging_time: battery.chargingTime,
+                        discharging_time: battery.dischargingTime,
+                        level: battery.level
+                    };
+                } catch (e) {
+                    fingerprintData.battery = { error: e.message };
+                }
+            }
+
+            // 媒体设备
+            if (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
+                try {
+                    const devices = await navigator.mediaDevices.enumerateDevices();
+                    fingerprintData.media_devices = devices.map(device => ({
+                        kind: device.kind,
+                        label: device.label,
+                        device_id: device.deviceId
+                    }));
+                } catch (e) {
+                    fingerprintData.media_devices = [];
+                }
+            }
+
+            // 系统信息
+            fingerprintData.system = {
+                os: detectOS(),
+                os_version: detectOSVersion(),
+                architecture: navigator.platform.includes('64') ? 'x64' : 'x86'
+            };
+        }
+
+        function detectFonts() {
+            const baseFonts = ['monospace', 'sans-serif', 'serif'];
+            const testString = 'mmmmmmmmmmlli';
+            const testSize = '72px';
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+
+            const testFonts = [
+                'Arial', 'Verdana', 'Times New Roman', 'Courier New',
+                'Georgia', 'Palatino', 'Garamond', 'Bookman',
+                'Comic Sans MS', 'Trebuchet MS', 'Impact'
+            ];
+
+            const available = [];
+
+            const baseWidths = {};
+            for (const baseFont of baseFonts) {
+                ctx.font = testSize + ' ' + baseFont;
+                baseWidths[baseFont] = ctx.measureText(testString).width;
+            }
+
+            for (const font of testFonts) {
+                let detected = false;
+                for (const baseFont of baseFonts) {
+                    ctx.font = testSize + ' ' + font + ', ' + baseFont;
+                    const width = ctx.measureText(testString).width;
+                    if (width !== baseWidths[baseFont]) {
+                        detected = true;
+                        break;
+                    }
+                }
+                if (detected) {
+                    available.push(font);
+                }
+            }
+
+            return available;
+        }
+
+        function detectOS() {
+            const ua = navigator.userAgent;
+            if (ua.includes('Windows')) return 'Windows';
+            if (ua.includes('Mac')) return 'macOS';
+            if (ua.includes('Linux')) return 'Linux';
+            if (ua.includes('Android')) return 'Android';
+            if (ua.includes('iOS')) return 'iOS';
+            return 'Unknown';
+        }
+
+        function detectOSVersion() {
+            const ua = navigator.userAgent;
+            if (ua.includes('Windows NT 10.0')) return '10';
+            if (ua.includes('Windows NT 11.0')) return '11';
+            if (ua.includes('Mac OS X')) {
+                const match = ua.match(/Mac OS X (\d+[._]\d+[._]\d+)/);
+                return match ? match[1].replace(/_/g, '.') : 'Unknown';
+            }
+            return 'Unknown';
+        }
+
+        function downloadJSON() {
+            const dataStr = JSON.stringify(fingerprintData, null, 2);
+            const dataBlob = new Blob([dataStr], { type: 'application/json' });
+            const url = URL.createObjectURL(dataBlob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `fingerprint_${fingerprintData.user_id}.json`;
+            link.click();
+            URL.revokeObjectURL(url);
+        }
+
+        function copyToClipboard() {
+            const dataStr = JSON.stringify(fingerprintData, null, 2);
+            navigator.clipboard.writeText(dataStr).then(() => {
+                updateStatus('✅ 已复制到剪贴板！', 'success');
+                setTimeout(() => {
+                    updateStatus('✅ 指纹收集完成！', 'success');
+                }, 2000);
+            });
+        }
+
+        // 页面加载时自动收集
+        window.addEventListener('load', () => {
+            setTimeout(() => {
+                collectFingerprint();
+            }, 500);
+        });
+    </script>
+</body>
+</html>
+

@@ -35,7 +35,7 @@ func main() {
 	page := instance.Page()
 
 	fmt.Println("📂 Navigating to Google...")
-	if err := page.Navigate("https://google.com"); err != nil {
+	if err := page.Navigate("https://pay.ssl.kuaishou.com/pay?source=NewReco"); err != nil {
 		log.Fatalf("❌ Navigation failed: %v", err)
 	}
 

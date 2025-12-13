@@ -48,7 +48,7 @@ func main() {
 
 	// Example 1: Basic navigation
 	fmt.Println("Navigating to Google...")
-	if err := browserPage.Navigate("https://www.google.com"); err != nil {
+	if err := browserPage.Navigate("https://browserleaks.com/canvas"); err != nil {
 		log.Fatalf("Failed to navigate: %v", err)
 	}
 
@@ -77,7 +77,7 @@ func main() {
 
 	// Keep browser open for a while to observe
 	fmt.Println("Browser will stay open for 30 seconds for observation...")
-	time.Sleep(30 * time.Second)
+	time.Sleep(3000 * time.Second)
 
 	fmt.Println("Example completed successfully!")
 }

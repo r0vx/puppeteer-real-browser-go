@@ -25,7 +25,7 @@ FILES=(
     "pkg/browser/pool.go"
     "pkg/browser/wait.go"
     "pkg/browser/pool_test.go"
-    "cmd/example/performance_test.go"
+    "cmd/example/performance_demo.go"
 )
 
 all_files_exist=true
