@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -302,21 +304,69 @@ func (c *CustomCDPClient) TakeScreenshot() ([]byte, error) {
 
 // Click performs a click without Runtime.Enable
 func (c *CustomCDPClient) Click(x, y float64) error {
-	// Use Input.dispatchMouseEvent instead of Runtime.evaluate
-	params := map[string]interface{}{
-		"type":   "mousePressed",
-		"x":      x,
-		"y":      y,
-		"button": "left",
+	// 1. 先移动鼠标到目标位置
+	moveParams := map[string]interface{}{
+		"type": "mouseMoved",
+		"x":    x,
+		"y":    y,
 	}
-
-	if _, err := c.sendCommand("Input.dispatchMouseEvent", params); err != nil {
+	if _, err := c.sendCommand("Input.dispatchMouseEvent", moveParams); err != nil {
 		return err
 	}
 
-	params["type"] = "mouseReleased"
-	_, err := c.sendCommand("Input.dispatchMouseEvent", params)
+	// 2. 鼠标按下
+	pressParams := map[string]interface{}{
+		"type":       "mousePressed",
+		"x":          x,
+		"y":          y,
+		"button":     "left",
+		"clickCount": 1,
+	}
+	if _, err := c.sendCommand("Input.dispatchMouseEvent", pressParams); err != nil {
+		return err
+	}
+
+	// 3. 短暂延迟模拟真实点击
+	time.Sleep(50 * time.Millisecond)
+
+	// 4. 鼠标释放
+	releaseParams := map[string]interface{}{
+		"type":       "mouseReleased",
+		"x":          x,
+		"y":          y,
+		"button":     "left",
+		"clickCount": 1,
+	}
+	_, err := c.sendCommand("Input.dispatchMouseEvent", releaseParams)
 	return err
+}
+
+// Type sends keyboard events for each character (real typing)
+func (c *CustomCDPClient) Type(text string) error {
+	for _, char := range text {
+		charStr := string(char)
+
+		// KeyDown
+		keyParams := map[string]interface{}{
+			"type": "keyDown",
+			"text": charStr,
+		}
+		if _, err := c.sendCommand("Input.dispatchKeyEvent", keyParams); err != nil {
+			return err
+		}
+
+		// KeyUp
+		keyUpParams := map[string]interface{}{
+			"type": "keyUp",
+		}
+		if _, err := c.sendCommand("Input.dispatchKeyEvent", keyUpParams); err != nil {
+			return err
+		}
+
+		// 模拟人类输入速度
+		time.Sleep(time.Duration(50+rand.Intn(100)) * time.Millisecond)
+	}
+	return nil
 }
 
 // Close closes the CDP connection
@@ -369,16 +419,13 @@ func (c *CustomCDPClient) CreateExecutionContextWithBinding() (int, error) {
 
 // EvaluateWithBinding evaluates JavaScript using binding method to avoid Runtime.Enable
 func (c *CustomCDPClient) EvaluateWithBinding(expression string) (interface{}, error) {
-	// Get context ID using binding method
-	contextId, err := c.CreateExecutionContextWithBinding()
-	if err != nil {
-		return nil, err
-	}
-
-	// Evaluate in the specific context
+	// CRITICAL FIX: Don't specify contextId - let Chrome use the default (current) context
+	// Navigate creates a new execution context, and specifying an old contextId causes
+	// "Cannot find context with specified id" errors
+	// By omitting contextId, Chrome will automatically use the active execution context
 	params := map[string]interface{}{
-		"expression":            expression,
-		"contextId":             contextId,
+		"expression": expression,
+		// contextId is intentionally omitted - Chrome will use default context
 		"returnByValue":         true,
 		"awaitPromise":          false,
 		"userGesture":           false,
@@ -492,12 +539,21 @@ func (p *CustomCDPPage) Evaluate(script string) (interface{}, error) {
 	return p.client.EvaluateWithBinding(script)
 }
 
+// escapeJsSelector 转义选择器中的特殊字符，用于在 JS 字符串中安全使用
+func escapeJsSelector(selector string) string {
+	// 转义反斜杠和单引号
+	escaped := strings.ReplaceAll(selector, `\`, `\\`)
+	escaped = strings.ReplaceAll(escaped, `'`, `\'`)
+	return escaped
+}
+
 // WaitForSelector waits for an element
 func (p *CustomCDPPage) WaitForSelector(selector string) error {
+	escaped := escapeJsSelector(selector)
 	// Simplified implementation using polling
 	maxAttempts := 30
 	for i := 0; i < maxAttempts; i++ {
-		result, err := p.Evaluate(fmt.Sprintf("document.querySelector('%s') !== null", selector))
+		result, err := p.Evaluate(fmt.Sprintf("document.querySelector('%s') !== null", escaped))
 		if err != nil {
 			continue
 		}
@@ -510,6 +566,105 @@ func (p *CustomCDPPage) WaitForSelector(selector string) error {
 	}
 
 	return fmt.Errorf("element with selector '%s' not found", selector)
+}
+
+// ClickSelector clicks an element by CSS selector
+func (p *CustomCDPPage) ClickSelector(selector string) error {
+	escaped := escapeJsSelector(selector)
+	// 等待元素出现
+	if err := p.WaitForSelector(selector); err != nil {
+		return err
+	}
+
+	// 获取坐标并点击
+	result, err := p.Evaluate(fmt.Sprintf(`
+		(function() {
+			const elem = document.querySelector('%s');
+			if (!elem) return null;
+			elem.scrollIntoViewIfNeeded ? elem.scrollIntoViewIfNeeded() : elem.scrollIntoView({block: 'center'});
+			const rect = elem.getBoundingClientRect();
+			return {x: rect.left + rect.width/2, y: rect.top + rect.height/2};
+		})()
+	`, escaped))
+	if err != nil {
+		return err
+	}
+
+	coords, ok := result.(map[string]interface{})
+	if !ok || coords == nil {
+		return fmt.Errorf("element not found: %s", selector)
+	}
+
+	x, _ := coords["x"].(float64)
+	y, _ := coords["y"].(float64)
+	return p.Click(x, y)
+}
+
+// RealClickSelector clicks an element with human-like mouse movement
+func (p *CustomCDPPage) RealClickSelector(selector string) error {
+	escaped := escapeJsSelector(selector)
+	// 等待元素出现
+	if err := p.WaitForSelector(selector); err != nil {
+		return err
+	}
+
+	// 获取坐标
+	result, err := p.Evaluate(fmt.Sprintf(`
+		(function() {
+			const elem = document.querySelector('%s');
+			if (!elem) return null;
+			elem.scrollIntoViewIfNeeded ? elem.scrollIntoViewIfNeeded() : elem.scrollIntoView({block: 'center'});
+			const rect = elem.getBoundingClientRect();
+			const rx = (Math.random() - 0.5) * Math.min(rect.width * 0.3, 8);
+			const ry = (Math.random() - 0.5) * Math.min(rect.height * 0.3, 8);
+			return {x: rect.left + rect.width/2 + rx, y: rect.top + rect.height/2 + ry};
+		})()
+	`, escaped))
+	if err != nil {
+		return err
+	}
+
+	coords, ok := result.(map[string]interface{})
+	if !ok || coords == nil {
+		return fmt.Errorf("element not found: %s", selector)
+	}
+
+	x, _ := coords["x"].(float64)
+	y, _ := coords["y"].(float64)
+	return p.RealClick(x, y)
+}
+
+// RealSendKeys types text using real keyboard events (maintains focus)
+func (p *CustomCDPPage) RealSendKeys(text string) error {
+	return p.client.Type(text)
+}
+
+// SendKeys types text into an element
+func (p *CustomCDPPage) SendKeys(selector, text string) error {
+	escaped := escapeJsSelector(selector)
+	// 点击聚焦
+	if err := p.ClickSelector(selector); err != nil {
+		return err
+	}
+
+	// 输入文本
+	for _, char := range text {
+		_, err := p.Evaluate(fmt.Sprintf(`
+			(function() {
+				const elem = document.querySelector('%s');
+				if (!elem) throw new Error('Element not found');
+				elem.focus();
+				const val = elem.value || '';
+				elem.value = val + '%c';
+				elem.dispatchEvent(new Event('input', {bubbles: true}));
+			})()
+		`, escaped, char))
+		if err != nil {
+			return err
+		}
+		time.Sleep(time.Duration(80+rand.Intn(120)) * time.Millisecond)
+	}
+	return nil
 }
 
 // Screenshot takes a screenshot

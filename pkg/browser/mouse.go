@@ -190,8 +190,8 @@ func (p *CDPPage) RealScroll(deltaX, deltaY float64) error {
 	)
 }
 
-// RealType performs realistic typing with human-like timing and variations
-func (p *CDPPage) RealType(text string) error {
+// RealSendKeys performs realistic typing with human-like timing and variations
+func (p *CDPPage) RealSendKeys(text string) error {
 	return chromedp.Run(p.ctx,
 		chromedp.ActionFunc(func(ctx context.Context) error {
 			for _, char := range text {

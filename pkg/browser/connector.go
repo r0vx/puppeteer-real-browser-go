@@ -68,6 +68,11 @@ type CDPPage struct {
 	requestListenerMu     sync.Mutex         // 保护监听器操作
 }
 
+// GetContext 返回 chromedp 上下文（用于直接调用 chromedp 方法）
+func (p *CDPPage) GetContext() context.Context {
+	return p.ctx
+}
+
 // initialize sets up the page with Runtime.Enable bypass (rebrowser-patches style)
 func (p *CDPPage) initialize() error {
 	// CRITICAL: Completely avoid Runtime.Enable to prevent Cloudflare detection
@@ -120,6 +125,10 @@ func (p *CDPPage) initialize() error {
 
 // Navigate navigates to the specified URL
 func (p *CDPPage) Navigate(url string) error {
+	// Navigate will invalidate the current execution context
+	// We need to create a fresh chromedp context after navigation
+	// But we can't change p.ctx without breaking other things
+	// So we just navigate and accept that execution context might change
 	return chromedp.Run(p.ctx, chromedp.Navigate(url))
 }
 
@@ -176,6 +185,85 @@ func (p *CDPPage) evaluateViaDOM(script string) (interface{}, error) {
 // WaitForSelector waits for an element to appear
 func (p *CDPPage) WaitForSelector(selector string) error {
 	return chromedp.Run(p.ctx, chromedp.WaitVisible(selector))
+}
+
+// ClickSelector clicks an element by CSS selector using chromedp native method
+// This is more reliable than coordinate-based clicking for standard elements
+func (p *CDPPage) ClickSelector(selector string) error {
+	return chromedp.Run(p.ctx,
+		chromedp.WaitVisible(selector),
+		chromedp.Click(selector, chromedp.NodeVisible),
+	)
+}
+
+// RealClickSelector clicks an element with human-like mouse movement
+// Uses Bezier curve trajectory to move to element before clicking
+func (p *CDPPage) RealClickSelector(selector string) error {
+	// 先等待元素可见
+	if err := chromedp.Run(p.ctx, chromedp.WaitVisible(selector)); err != nil {
+		return fmt.Errorf("element not visible: %w", err)
+	}
+
+	// 获取元素坐标
+	var x, y float64
+	err := chromedp.Run(p.ctx, chromedp.Evaluate(fmt.Sprintf(`
+		(function() {
+			const elem = document.querySelector('%s');
+			if (!elem) return null;
+			
+			elem.scrollIntoViewIfNeeded ? elem.scrollIntoViewIfNeeded() : elem.scrollIntoView({block: 'center'});
+			
+			const rect = elem.getBoundingClientRect();
+			// 添加随机偏移更像人类
+			const rx = (Math.random() - 0.5) * Math.min(rect.width * 0.3, 8);
+			const ry = (Math.random() - 0.5) * Math.min(rect.height * 0.3, 8);
+			
+			return {
+				x: rect.left + rect.width / 2 + rx,
+				y: rect.top + rect.height / 2 + ry
+			};
+		})()
+	`, selector), &map[string]float64{"x": 0, "y": 0}))
+	if err != nil {
+		return fmt.Errorf("failed to get element coords: %w", err)
+	}
+
+	// 从 Evaluate 结果中提取坐标
+	var coordResult map[string]interface{}
+	err = chromedp.Run(p.ctx, chromedp.Evaluate(fmt.Sprintf(`
+		(function() {
+			const elem = document.querySelector('%s');
+			if (!elem) return null;
+			const rect = elem.getBoundingClientRect();
+			const rx = (Math.random() - 0.5) * Math.min(rect.width * 0.3, 8);
+			const ry = (Math.random() - 0.5) * Math.min(rect.height * 0.3, 8);
+			return {
+				x: rect.left + rect.width / 2 + rx,
+				y: rect.top + rect.height / 2 + ry
+			};
+		})()
+	`, selector), &coordResult))
+	if err != nil {
+		return fmt.Errorf("failed to get element coords: %w", err)
+	}
+
+	if coordResult == nil {
+		return fmt.Errorf("element not found: %s", selector)
+	}
+
+	x, _ = coordResult["x"].(float64)
+	y, _ = coordResult["y"].(float64)
+
+	// 使用拟人化点击
+	return p.RealClick(x, y)
+}
+
+// SendKeys types text into an element using chromedp native method
+func (p *CDPPage) SendKeys(selector, text string) error {
+	return chromedp.Run(p.ctx,
+		chromedp.WaitVisible(selector),
+		chromedp.SendKeys(selector, text),
+	)
 }
 
 // Screenshot takes a screenshot of the page

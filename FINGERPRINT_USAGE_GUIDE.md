@@ -11,6 +11,21 @@
 
 ## 🚀 快速开始
 
+### ⚙️ 两种模式对比
+
+| 特性 | UseCustomCDP: false | UseCustomCDP: true |
+|------|--------------------|--------------------|
+| **反检测能力** | ⭐⭐⭐⭐ 很强 | ⭐⭐⭐⭐⭐ 最强 |
+| **Runtime.Enable** | AddScript规避 | 完全不使用 |
+| **API便利性** | ⭐⭐⭐⭐ 方便 | ⭐⭐⭐ 需手动 |
+| **选择器点击** | 较容易实现 | 需要辅助函数 |
+| **坐标点击** | ✅ 支持 | ✅ 支持 |
+| **适用场景** | **99%的情况** | 极端反检测 |
+
+**推荐**：大多数情况使用 `UseCustomCDP: false`（默认），已经足够强！
+
+---
+
 ### 方法1：最简单的方式（推荐）
 
 ```go
@@ -433,7 +448,41 @@ fp3, _ := manager.GetUserFingerprint("user_002") // 不同用户
 // fp3 != fp1 （不同）
 ```
 
-### Q3: 需要重启浏览器才能应用新指纹吗？
+### Q3: UseCustomCDP: true 时如何点击元素选择器？
+
+**A**: `UseCustomCDP: true` 模式只支持坐标点击，不直接支持选择器。但项目提供了辅助函数：
+
+```go
+// 方法1：使用辅助函数（推荐）
+import "github.com/r0vx/puppeteer-real-browser-go/pkg/browser"
+
+// 点击选择器
+err := browser.ClickSelector(page, "#myButton")
+
+// 输入文本
+err := browser.TypeText(page, "input[name='username']", "myuser")
+
+// 获取文本
+text, err := browser.GetElementText(page, ".result")
+
+// 检查可见性
+visible, err := browser.IsElementVisible(page, "#popup")
+```
+
+```go
+// 方法2：手动获取坐标
+coords, err := browser.GetElementCoords(page, "#myButton")
+if err == nil {
+    page.RealClick(coords.X, coords.Y)  // 使用真实鼠标轨迹
+}
+```
+
+**为什么有这个限制？**
+- `chromedp.Click(selector)` 内部需要 `Runtime.Enable` 来查找元素
+- `UseCustomCDP: true` 的目标是**完全避免 Runtime.Enable**
+- 所以提供了不依赖Runtime的替代方案
+
+### Q4: 需要重启浏览器才能应用新指纹吗？
 
 **A**: 是的。指纹需要在浏览器启动时应用。如果要切换指纹，需要关闭当前浏览器实例并启动新实例。
 
@@ -489,6 +538,129 @@ opts := &browser.ConnectOptions{
     ),
 }
 ```
+
+---
+
+## 🔧 UseCustomCDP 模式详解
+
+### 什么时候使用 Custom CDP？
+
+```go
+// ❌ 不推荐：普通网站没必要
+opts := &browser.ConnectOptions{
+    UseCustomCDP: true,  // 杀鸡用牛刀
+}
+
+// ✅ 推荐：面对强检测时才用
+opts := &browser.ConnectOptions{
+    UseCustomCDP: true,  // 面对 Cloudflare Turnstile 等强检测
+}
+```
+
+### Custom CDP 模式下的元素操作
+
+```go
+page := instance.Page()
+
+// ✅ 方式1：使用项目提供的辅助函数
+import "github.com/r0vx/puppeteer-real-browser-go/pkg/browser"
+
+// 点击元素
+browser.ClickSelector(page, "#submitBtn")
+
+// 输入文本
+browser.TypeText(page, "input[name='email']", "test@example.com")
+
+// 选择下拉框
+browser.SelectOption(page, "select[name='country']", "US")
+
+// 勾选复选框
+browser.CheckCheckbox(page, "#agree", true)
+
+// 获取文本
+text, _ := browser.GetElementText(page, ".message")
+
+// 检查可见性
+visible, _ := browser.IsElementVisible(page, "#popup")
+```
+
+```go
+// ✅ 方式2：手动获取坐标
+// 1. 获取元素坐标
+coords, err := browser.GetElementCoords(page, "#myButton")
+if err != nil {
+    log.Fatal(err)
+}
+
+// 2. 使用真实鼠标轨迹点击
+page.RealClick(coords.X, coords.Y)
+```
+
+```go
+// ✅ 方式3：直接用 JavaScript
+// 如果不需要点击，只需要修改DOM
+page.Evaluate(`
+    document.querySelector('#email').value = 'test@example.com';
+    document.querySelector('#form').submit();
+`)
+```
+
+### 为什么不能用 chromedp.Click(selector)？
+
+```
+chromedp.Click(selector) 的内部流程：
+    ↓
+1. Runtime.Enable          ← ⚠️ 触发检测！
+    ↓
+2. Runtime.evaluate(querySelector)
+    ↓
+3. DOM.getBoxModel
+    ↓
+4. Input.dispatchMouseEvent
+
+═══════════════════════════════
+
+Custom CDP 的流程：
+    ↓
+1. Runtime.evaluate(querySelector)  ← ✅ 无需 Runtime.Enable
+    ↓
+2. 解析坐标
+    ↓
+3. Input.dispatchMouseEvent         ← ✅ 直接调用CDP命令
+```
+
+### 完整示例
+
+```go
+package main
+
+import (
+    "context"
+    "github.com/r0vx/puppeteer-real-browser-go/pkg/browser"
+)
+
+func main() {
+    ctx := context.Background()
+    
+    // 启用 Custom CDP 模式
+    opts := &browser.ConnectOptions{
+        UseCustomCDP: true,
+    }
+    
+    instance, _ := browser.Connect(ctx, opts)
+    defer instance.Close()
+    
+    page := instance.Page()
+    page.Navigate("https://example.com")
+    
+    // 使用辅助函数操作元素
+    browser.ClickSelector(page, "#loginBtn")
+    browser.TypeText(page, "input[name='user']", "myuser")
+    browser.ClickSelector(page, "button[type='submit']")
+}
+```
+
+查看完整示例：`cmd/example/custom_cdp_demo.go`
 
 ---
 

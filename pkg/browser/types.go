@@ -48,12 +48,12 @@ type ConnectOptions struct {
 
 	// Chrome extensions support
 	Extensions []string `json:"extensions"` // Paths to extension directories
-	
+
 	// Auto-load default extensions
 	AutoLoadDefaultExtensions bool `json:"autoLoadDefaultExtensions"` // Automatically load default extensions
 
 	// Profile/Account management
-	ProfileName   string `json:"profileName"`   // Unique profile name for this account
+	ProfileName    string `json:"profileName"`    // Unique profile name for this account
 	PersistProfile bool   `json:"persistProfile"` // Whether to persist user data or .crx files
 }
 
@@ -72,8 +72,8 @@ type BrowserInstance struct {
 	chrome       *ChromeProcess
 	ctx          context.Context
 	cancel       context.CancelFunc
-	lastUsed     time.Time      // 最后使用时间（用于健康检查优化）
-	healthStatus atomic.Value   // 缓存的健康状态
+	lastUsed     time.Time    // 最后使用时间（用于健康检查优化）
+	healthStatus atomic.Value // 缓存的健康状态
 }
 
 // BrowserContext represents a browser context (like puppeteer browserContext)
@@ -106,6 +106,16 @@ type Page interface {
 	GetURL() (string, error)
 	SetRequestInterception(enabled bool) error
 	OnRequest(handler RequestHandler) error
+}
+
+// PageWithSelector extends Page with selector-based methods
+// Use type assertion to access these methods: page.(*CDPPage).ClickSelector(...)
+type PageWithSelector interface {
+	Page
+	ClickSelector(selector string) error     // 原生 chromedp 点击
+	RealClickSelector(selector string) error // 拟人化贝塞尔曲线点击
+	SendKeys(selector, text string) error    // 原生 chromedp 输入
+	RealSendKeys(text string) error          // 真实键盘输入（需先获取焦点）
 }
 
 // RequestHandler is a function type for handling intercepted requests
