@@ -2,6 +2,7 @@ package browser
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"math/rand"
@@ -727,4 +728,270 @@ func (p *CustomCDPPage) OnRequest(handler RequestHandler) error {
 	// TODO: Implement request handler for CustomCDPPage if needed
 	// For now, return nil to satisfy the interface
 	return nil
+}
+
+// ==================== 新增方法 (按原版优化) ====================
+
+// NavigateWithOptions navigates with options
+func (p *CustomCDPPage) NavigateWithOptions(url string, opts *NavigateOptions) error {
+	// CustomCDPPage 简化实现，只做基本导航
+	return p.Navigate(url)
+}
+
+// NavigateWithReferrer navigates with referrer
+func (p *CustomCDPPage) NavigateWithReferrer(url, referrer string) error {
+	params := map[string]interface{}{
+		"url":      url,
+		"referrer": referrer,
+	}
+	_, err := p.client.sendCommand("Page.navigate", params)
+	return err
+}
+
+// WaitVisible waits for element to be visible
+func (p *CustomCDPPage) WaitVisible(selector string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		visible, err := p.isElementVisible(selector)
+		if err == nil && visible {
+			return nil
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return fmt.Errorf("timeout waiting for element: %s", selector)
+}
+
+// WaitNotVisible waits for element to disappear
+func (p *CustomCDPPage) WaitNotVisible(selector string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		visible, _ := p.isElementVisible(selector)
+		if !visible {
+			return nil
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return fmt.Errorf("timeout waiting for element to disappear: %s", selector)
+}
+
+// WaitVisibleByID waits for element by ID
+// Has checks if element exists
+func (p *CustomCDPPage) Has(selector string) (bool, error) {
+	escaped := escapeJsSelector(selector)
+	result, err := p.Evaluate(fmt.Sprintf(`document.querySelector('%s') !== null`, escaped))
+	if err != nil {
+		return false, err
+	}
+	if b, ok := result.(bool); ok {
+		return b, nil
+	}
+	return false, nil
+}
+
+// isElementVisible checks if element is visible
+func (p *CustomCDPPage) isElementVisible(selector string) (bool, error) {
+	escaped := escapeJsSelector(selector)
+	result, err := p.Evaluate(fmt.Sprintf(`
+		(function() {
+			const elem = document.querySelector('%s');
+			if (!elem) return false;
+			const rect = elem.getBoundingClientRect();
+			const style = window.getComputedStyle(elem);
+			return rect.width > 0 && rect.height > 0 && 
+			       style.visibility !== 'hidden' && 
+			       style.display !== 'none';
+		})()
+	`, escaped))
+	if err != nil {
+		return false, err
+	}
+	if b, ok := result.(bool); ok {
+		return b, nil
+	}
+	return false, nil
+}
+
+// SetCookies sets cookies
+func (p *CustomCDPPage) SetCookies(cookiesJSON string, url string) error {
+	var cookies []map[string]interface{}
+	if err := json.Unmarshal([]byte(cookiesJSON), &cookies); err != nil {
+		return err
+	}
+	for _, cookie := range cookies {
+		if cookie["url"] == nil {
+			cookie["url"] = url
+		}
+		_, err := p.client.sendCommand("Network.setCookie", cookie)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// GetCookies gets cookies
+// GetCookies gets cookies as JSON string
+func (p *CustomCDPPage) GetCookies() (string, error) {
+	result, err := p.client.sendCommand("Network.getCookies", nil)
+	if err != nil {
+		return "", err
+	}
+	// 解析 result
+	var resp struct {
+		Cookies json.RawMessage `json:"cookies"`
+	}
+	if err := json.Unmarshal(result, &resp); err != nil {
+		return "[]", nil
+	}
+	return string(resp.Cookies), nil
+}
+
+// ClearCookies clears all cookies
+func (p *CustomCDPPage) ClearCookies() error {
+	_, err := p.client.sendCommand("Network.clearBrowserCookies", nil)
+	return err
+}
+
+// SetLocalStorage sets localStorage
+func (p *CustomCDPPage) SetLocalStorage(dataJSON string) error {
+	script := fmt.Sprintf(`
+		(function() {
+			const data = %s;
+			for (const [key, value] of Object.entries(data)) {
+				localStorage.setItem(key, typeof value === 'string' ? value : JSON.stringify(value));
+			}
+		})()
+	`, dataJSON)
+	_, err := p.Evaluate(script)
+	return err
+}
+
+// GetLocalStorage gets localStorage
+func (p *CustomCDPPage) GetLocalStorage() (string, error) {
+	result, err := p.Evaluate(`JSON.stringify(localStorage)`)
+	if err != nil {
+		return "", err
+	}
+	if str, ok := result.(string); ok {
+		return str, nil
+	}
+	return "{}", nil
+}
+
+// SetSessionStorage sets sessionStorage
+func (p *CustomCDPPage) SetSessionStorage(dataJSON string) error {
+	script := fmt.Sprintf(`
+		(function() {
+			const data = %s;
+			for (const [key, value] of Object.entries(data)) {
+				sessionStorage.setItem(key, typeof value === 'string' ? value : JSON.stringify(value));
+			}
+		})()
+	`, dataJSON)
+	_, err := p.Evaluate(script)
+	return err
+}
+
+// GetSessionStorage gets sessionStorage
+func (p *CustomCDPPage) GetSessionStorage() (string, error) {
+	result, err := p.Evaluate(`JSON.stringify(sessionStorage)`)
+	if err != nil {
+		return "", err
+	}
+	if str, ok := result.(string); ok {
+		return str, nil
+	}
+	return "{}", nil
+}
+
+// ScreenshotElement takes element screenshot
+func (p *CustomCDPPage) ScreenshotElement(selector string) ([]byte, error) {
+	// 获取元素位置
+	escaped := escapeJsSelector(selector)
+	result, err := p.Evaluate(fmt.Sprintf(`
+		(function() {
+			const elem = document.querySelector('%s');
+			if (!elem) return null;
+			const rect = elem.getBoundingClientRect();
+			return {x: rect.x, y: rect.y, width: rect.width, height: rect.height};
+		})()
+	`, escaped))
+	if err != nil {
+		return nil, err
+	}
+
+	if result == nil {
+		return nil, fmt.Errorf("element not found: %s", selector)
+	}
+
+	// 解析位置
+	rectMap, ok := result.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("invalid rect result")
+	}
+
+	// 使用 clip 参数截图
+	params := map[string]interface{}{
+		"format": "png",
+		"clip": map[string]interface{}{
+			"x":      rectMap["x"],
+			"y":      rectMap["y"],
+			"width":  rectMap["width"],
+			"height": rectMap["height"],
+			"scale":  1,
+		},
+	}
+
+	resp, err := p.client.sendCommand("Page.captureScreenshot", params)
+	if err != nil {
+		return nil, err
+	}
+
+	var screenshotResp struct {
+		Data string `json:"data"`
+	}
+	if err := json.Unmarshal(resp, &screenshotResp); err != nil {
+		return nil, fmt.Errorf("failed to parse screenshot response: %w", err)
+	}
+
+	return base64.StdEncoding.DecodeString(screenshotResp.Data)
+}
+
+// ScreenshotQrcode takes element screenshot and returns base64
+func (p *CustomCDPPage) ScreenshotQrcode(selector string) (string, error) {
+	buf, err := p.ScreenshotElement(selector)
+	if err != nil {
+		return "", err
+	}
+	return base64.StdEncoding.EncodeToString(buf), nil
+}
+
+// ExecuteJS executes JavaScript
+func (p *CustomCDPPage) ExecuteJS(script string, result interface{}) error {
+	res, err := p.Evaluate(script)
+	if err != nil {
+		return err
+	}
+	// 简单赋值
+	if result != nil {
+		data, _ := json.Marshal(res)
+		return json.Unmarshal(data, result)
+	}
+	return nil
+}
+
+// Refresh refreshes the page
+func (p *CustomCDPPage) Refresh(timeout time.Duration) error {
+	_, err := p.client.sendCommand("Page.reload", nil)
+	return err
+}
+
+// Sleep pauses execution
+func (p *CustomCDPPage) Sleep(duration time.Duration) {
+	time.Sleep(duration)
+}
+
+// GetContext returns nil for CustomCDPPage (not using chromedp context)
+func (p *CustomCDPPage) GetContext() context.Context {
+	return context.Background()
 }

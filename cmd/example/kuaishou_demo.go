@@ -21,6 +21,11 @@ const (
 	AmountInput = "#root > div > div.yO8kMoLepIjfM5ZIRM6Q > div > div.n1SnVijkShoQBxLXjI7j > div > input"
 	// 确定按钮
 	ConfirmBtn = "#root > div > div.yO8kMoLepIjfM5ZIRM6Q > div > div.Pc1O3eZm5SMdnuaFF3rk > button.JnjN1NsuzX0e7meKTHb8.XSrBZ0vfjO5Y1lyu05IU"
+
+	// 账号输入框
+	AccountInput = "#root > div > main > div > div > div.w3F19lRc539xYVKSHMLW > div > div > input"
+	// 账号确定按钮
+	AccountConfirmBtn = "#root > div > main > div > div > div.w3F19lRc539xYVKSHMLW > div > div > button"
 )
 
 func main() {
@@ -33,10 +38,10 @@ func main() {
 
 	opts := &browser.ConnectOptions{
 		Headless:     false,
-		UseCustomCDP: true,
+		UseCustomCDP: false,
 		Turnstile:    false,
 		Args: []string{
-			"--window-size=1280,900",
+			"--window-size=1920,1080",
 		},
 	}
 
@@ -61,6 +66,38 @@ func main() {
 
 	title, _ := page.GetTitle()
 	fmt.Printf("✅ 页面标题: %s\n", title)
+
+	// 步骤0: 输入账号
+	fmt.Println("\n📌 步骤0: 输入快手账号")
+	fmt.Printf("   选择器: %s\n", AccountInput)
+
+	if err := selectorPage.RealClickSelector(AccountInput); err != nil {
+		fmt.Printf("⚠️ 点击账号输入框失败: %v (可能页面结构不同)\n", err)
+	} else {
+		fmt.Println("✅ 点击账号输入框成功!")
+		time.Sleep(300 * time.Millisecond)
+
+		if err := selectorPage.RealSendKeys("6666666"); err != nil {
+			fmt.Printf("❌ 输入账号失败: %v\n", err)
+		} else {
+			fmt.Println("✅ 输入账号成功: 6666666")
+		}
+
+		time.Sleep(500 * time.Millisecond)
+		saveScreenshot(page, "step0_after_account.png")
+
+		// 点击账号确定按钮
+		fmt.Println("\n📌 点击账号确定按钮")
+		fmt.Printf("   选择器: %s\n", AccountConfirmBtn)
+
+		if err := selectorPage.RealClickSelector(AccountConfirmBtn); err != nil {
+			fmt.Printf("⚠️ 点击账号确定失败: %v\n", err)
+		} else {
+			fmt.Println("✅ 点击账号确定成功!")
+		}
+		time.Sleep(2 * time.Second)
+		saveScreenshot(page, "step0_after_confirm.png")
+	}
 
 	// 步骤1: 点击自定义金额
 	fmt.Println("\n📌 步骤1: RealClickSelector 点击自定义金额")
@@ -126,4 +163,3 @@ func saveScreenshot(page browser.Page, filename string) {
 		fmt.Printf("   已保存截图: %s\n", filename)
 	}
 }
-

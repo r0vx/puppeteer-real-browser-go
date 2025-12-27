@@ -3,6 +3,7 @@ package browser
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -123,13 +124,131 @@ func (p *CDPPage) initialize() error {
 	return nil
 }
 
-// Navigate navigates to the specified URL
+// WaitUntil 定义导航等待策略
+type WaitUntil string
+
+const (
+	WaitLoad            WaitUntil = "load"            // 等待 load 事件（默认）
+	WaitDOMContentLoaded WaitUntil = "domcontentloaded" // 等待 DOMContentLoaded
+	WaitNetworkIdle0    WaitUntil = "networkidle0"    // 500ms 内无网络请求
+	WaitNetworkIdle2    WaitUntil = "networkidle2"    // 500ms 内 ≤2 个网络请求
+)
+
+// NavigateOptions 导航选项
+type NavigateOptions struct {
+	WaitUntil WaitUntil     // 等待策略
+	Timeout   time.Duration // 超时时间
+	Referrer  string        // Referrer
+}
+
+// Navigate navigates to the specified URL (waits for load event)
 func (p *CDPPage) Navigate(url string) error {
-	// Navigate will invalidate the current execution context
-	// We need to create a fresh chromedp context after navigation
-	// But we can't change p.ctx without breaking other things
-	// So we just navigate and accept that execution context might change
 	return chromedp.Run(p.ctx, chromedp.Navigate(url))
+}
+
+// NavigateWithOptions navigates with custom options (like puppeteer page.goto)
+func (p *CDPPage) NavigateWithOptions(url string, opts *NavigateOptions) error {
+	if opts == nil {
+		return p.Navigate(url)
+	}
+
+	ctx := p.ctx
+	if opts.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(p.ctx, opts.Timeout)
+		defer cancel()
+	}
+
+	// 构建导航 action
+	var actions []chromedp.Action
+
+	// 如果有 Referrer，先设置
+	if opts.Referrer != "" {
+		actions = append(actions, chromedp.ActionFunc(func(ctx context.Context) error {
+			return page.SetDocumentContent("", fmt.Sprintf(`<script>Object.defineProperty(document, 'referrer', {get: () => '%s'})</script>`, opts.Referrer)).Do(ctx)
+		}))
+	}
+
+	// 根据 WaitUntil 策略选择等待方式
+	switch opts.WaitUntil {
+	case WaitDOMContentLoaded:
+		// 只等待 DOM 解析完成
+		actions = append(actions, chromedp.ActionFunc(func(ctx context.Context) error {
+			_, _, _, _, err := page.Navigate(url).Do(ctx)
+			return err
+		}))
+		actions = append(actions, chromedp.WaitReady("body", chromedp.ByQuery))
+
+	case WaitNetworkIdle0, WaitNetworkIdle2:
+		// 等待网络空闲
+		actions = append(actions, chromedp.Navigate(url))
+		actions = append(actions, p.waitNetworkIdle(opts.WaitUntil == WaitNetworkIdle0))
+
+	default: // WaitLoad 或默认
+		actions = append(actions, chromedp.Navigate(url))
+	}
+
+	return chromedp.Run(ctx, actions...)
+}
+
+// NavigateWithReferrer navigates with a referrer header
+func (p *CDPPage) NavigateWithReferrer(url, referrer string) error {
+	return chromedp.Run(p.ctx, chromedp.ActionFunc(func(ctx context.Context) error {
+		_, _, _, _, err := page.Navigate(url).WithReferrer(referrer).Do(ctx)
+		return err
+	}))
+}
+
+// waitNetworkIdle waits for network to become idle
+func (p *CDPPage) waitNetworkIdle(strict bool) chromedp.Action {
+	return chromedp.ActionFunc(func(ctx context.Context) error {
+		maxPending := 2
+		if strict {
+			maxPending = 0
+		}
+
+		pendingRequests := 0
+		idleStart := time.Time{}
+		done := make(chan struct{})
+		timeout := time.After(30 * time.Second)
+
+		chromedp.ListenTarget(ctx, func(ev interface{}) {
+			switch ev.(type) {
+			case *network.EventRequestWillBeSent:
+				pendingRequests++
+				idleStart = time.Time{}
+			case *network.EventLoadingFinished, *network.EventLoadingFailed:
+				pendingRequests--
+				if pendingRequests < 0 {
+					pendingRequests = 0
+				}
+				if pendingRequests <= maxPending {
+					if idleStart.IsZero() {
+						idleStart = time.Now()
+					}
+				}
+			}
+		})
+
+		// 检查网络空闲
+		ticker := time.NewTicker(100 * time.Millisecond)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-timeout:
+				return nil // 超时也继续
+			case <-done:
+				return nil
+			case <-ticker.C:
+				if !idleStart.IsZero() && time.Since(idleStart) >= 500*time.Millisecond {
+					return nil
+				}
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+	})
 }
 
 // Click performs a click at the specified coordinates
@@ -603,4 +722,249 @@ func (p *CDPPage) abortRequest(requestID string) error {
 	return chromedp.Run(p.ctx, chromedp.ActionFunc(func(ctx context.Context) error {
 		return fetch.FailRequest(fetch.RequestID(requestID), network.ErrorReasonAborted).Do(ctx)
 	}))
+}
+
+// ==================== Cookie/Storage 管理 ====================
+
+// SetCookies sets cookies for the page
+func (p *CDPPage) SetCookies(cookiesJSON string, url string) error {
+	return chromedp.Run(p.ctx, chromedp.ActionFunc(func(ctx context.Context) error {
+		// 解析 cookies JSON
+		var cookies []*network.CookieParam
+		if err := json.Unmarshal([]byte(cookiesJSON), &cookies); err != nil {
+			return fmt.Errorf("failed to parse cookies: %w", err)
+		}
+
+		// 设置每个 cookie 的 URL
+		for _, cookie := range cookies {
+			if cookie.URL == "" {
+				cookie.URL = url
+			}
+		}
+
+		return network.SetCookies(cookies).Do(ctx)
+	}))
+}
+
+// GetCookies gets all cookies for the current page
+// GetCookies gets all cookies as JSON string
+func (p *CDPPage) GetCookies() (string, error) {
+	var cookies []*network.Cookie
+	err := chromedp.Run(p.ctx, chromedp.ActionFunc(func(ctx context.Context) error {
+		var err error
+		cookies, err = network.GetCookies().Do(ctx)
+		return err
+	}))
+	if err != nil {
+		return "", err
+	}
+	data, err := json.Marshal(cookies)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+// ClearCookies clears all cookies
+func (p *CDPPage) ClearCookies() error {
+	return chromedp.Run(p.ctx, chromedp.ActionFunc(func(ctx context.Context) error {
+		return network.ClearBrowserCookies().Do(ctx)
+	}))
+}
+
+// SetLocalStorage sets localStorage data
+func (p *CDPPage) SetLocalStorage(dataJSON string) error {
+	script := fmt.Sprintf(`
+		(function() {
+			const data = %s;
+			for (const [key, value] of Object.entries(data)) {
+				localStorage.setItem(key, typeof value === 'string' ? value : JSON.stringify(value));
+			}
+		})()
+	`, dataJSON)
+	_, err := p.Evaluate(script)
+	return err
+}
+
+// GetLocalStorage gets all localStorage data as JSON
+func (p *CDPPage) GetLocalStorage() (string, error) {
+	result, err := p.Evaluate(`JSON.stringify(localStorage)`)
+	if err != nil {
+		return "", err
+	}
+	if str, ok := result.(string); ok {
+		return str, nil
+	}
+	return "{}", nil
+}
+
+// SetSessionStorage sets sessionStorage data
+func (p *CDPPage) SetSessionStorage(dataJSON string) error {
+	script := fmt.Sprintf(`
+		(function() {
+			const data = %s;
+			for (const [key, value] of Object.entries(data)) {
+				sessionStorage.setItem(key, typeof value === 'string' ? value : JSON.stringify(value));
+			}
+		})()
+	`, dataJSON)
+	_, err := p.Evaluate(script)
+	return err
+}
+
+// GetSessionStorage gets all sessionStorage data as JSON
+func (p *CDPPage) GetSessionStorage() (string, error) {
+	result, err := p.Evaluate(`JSON.stringify(sessionStorage)`)
+	if err != nil {
+		return "", err
+	}
+	if str, ok := result.(string); ok {
+		return str, nil
+	}
+	return "{}", nil
+}
+
+// ==================== 等待方法 ====================
+
+// WaitVisible waits for element to be visible with timeout
+func (p *CDPPage) WaitVisible(selector string, timeout time.Duration) error {
+	escaped := escapeSelector(selector)
+	deadline := time.Now().Add(timeout)
+
+	for time.Now().Before(deadline) {
+		result, err := p.Evaluate(fmt.Sprintf(`
+			(function() {
+				const elem = document.querySelector('%s');
+				if (!elem) return false;
+				const rect = elem.getBoundingClientRect();
+				const style = window.getComputedStyle(elem);
+				
+				// display:contents 特殊处理（元素存在但宽高为0）
+				if (style.display === 'contents') {
+					return style.visibility !== 'hidden' && style.opacity !== '0';
+				}
+				
+				return (rect.width > 0 || rect.height > 0) && 
+				       style.visibility !== 'hidden' && 
+				       style.display !== 'none' &&
+				       style.opacity !== '0';
+			})()
+		`, escaped))
+		if err == nil {
+			if visible, ok := result.(bool); ok && visible {
+				return nil
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return fmt.Errorf("timeout waiting for element visible: %s", selector)
+}
+
+// WaitNotVisible waits for element to disappear with timeout
+func (p *CDPPage) WaitNotVisible(selector string, timeout time.Duration) error {
+	escaped := escapeSelector(selector)
+	deadline := time.Now().Add(timeout)
+
+	for time.Now().Before(deadline) {
+		result, err := p.Evaluate(fmt.Sprintf(`
+			(function() {
+				const elem = document.querySelector('%s');
+				if (!elem) return true; // 不存在即为不可见
+				const rect = elem.getBoundingClientRect();
+				const style = window.getComputedStyle(elem);
+				// 宽高为0或隐藏
+				return rect.width === 0 || rect.height === 0 || 
+				       style.visibility === 'hidden' || 
+				       style.display === 'none' ||
+				       style.opacity === '0';
+			})()
+		`, escaped))
+		if err == nil {
+			if notVisible, ok := result.(bool); ok && notVisible {
+				return nil
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return fmt.Errorf("timeout waiting for element to disappear: %s", selector)
+}
+
+// WaitVisibleByID waits for element by ID to be visible
+// Has checks if element exists in the DOM
+func (p *CDPPage) Has(selector string) (bool, error) {
+	result, err := p.Evaluate(fmt.Sprintf(`document.querySelector('%s') !== null`, escapeSelector(selector)))
+	if err != nil {
+		return false, err
+	}
+	if b, ok := result.(bool); ok {
+		return b, nil
+	}
+	return false, nil
+}
+
+// ==================== 便捷方法 ====================
+
+// ExecuteJS executes JavaScript and returns result (alias for Evaluate)
+func (p *CDPPage) ExecuteJS(script string, result interface{}) error {
+	return chromedp.Run(p.ctx, chromedp.Evaluate(script, result))
+}
+
+// Refresh refreshes the current page
+func (p *CDPPage) Refresh(timeout time.Duration) error {
+	ctx := p.ctx
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(p.ctx, timeout)
+		defer cancel()
+	}
+	return chromedp.Run(ctx, chromedp.Reload())
+}
+
+// Sleep pauses execution for the specified duration
+func (p *CDPPage) Sleep(duration time.Duration) {
+	time.Sleep(duration)
+}
+
+// ==================== 元素截图 ====================
+
+// ScreenshotElement takes a screenshot of a specific element
+func (p *CDPPage) ScreenshotElement(selector string) ([]byte, error) {
+	// 先检查元素是否存在
+	has, err := p.Has(selector)
+	if err != nil {
+		return nil, err
+	}
+	if !has {
+		return nil, fmt.Errorf("element not found: %s", selector)
+	}
+
+	// 直接截图，不使用 WaitVisible
+	var buf []byte
+	ctx, cancel := context.WithTimeout(p.ctx, 5*time.Second)
+	defer cancel()
+
+	err = chromedp.Run(ctx,
+		chromedp.Screenshot(selector, &buf, chromedp.NodeVisible),
+	)
+	return buf, err
+}
+
+// ScreenshotQrcode takes a screenshot of an element and returns base64 string
+func (p *CDPPage) ScreenshotQrcode(selector string) (string, error) {
+	buf, err := p.ScreenshotElement(selector)
+	if err != nil {
+		return "", err
+	}
+	return base64.StdEncoding.EncodeToString(buf), nil
+}
+
+// ==================== 网络监听 ====================
+
+// ==================== 辅助函数 ====================
+
+// escapeSelector escapes special characters in selector for JavaScript
+func escapeSelector(selector string) string {
+	escaped := strings.ReplaceAll(selector, `\`, `\\`)
+	escaped = strings.ReplaceAll(escaped, `'`, `\'`)
+	return escaped
 }

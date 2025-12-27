@@ -12,53 +12,53 @@ import (
 func main() {
 	fmt.Println("🔍 测试抖音充值页面反检测")
 	fmt.Println(strings.Repeat("=", 60))
-	
+
 	ctx := context.Background()
-	
+
 	// 测试 1: 不使用反检测
 	fmt.Println("\n📊 测试 1: 原生访问（预期被检测）")
 	fmt.Println(strings.Repeat("-", 60))
 	testWithoutStealth(ctx)
-	
+
 	// 等待一下
 	fmt.Println("\n⏳ 等待 5 秒后进行第二个测试...\n")
 	time.Sleep(5 * time.Second)
-	
+
 	// 测试 2: 使用本项目的反检测
 	fmt.Println("\n📊 测试 2: 启用反检测（预期通过）")
 	fmt.Println(strings.Repeat("-", 60))
 	testWithStealth(ctx)
-	
+
 	fmt.Println("\n✅ 测试完成！")
 }
 
 func testWithoutStealth(ctx context.Context) {
 	fmt.Println("  [配置] 不使用反检测...")
-	
+
 	opts := &browser.ConnectOptions{
 		Headless:     false, // 可视化观察
 		UseCustomCDP: false, // 不使用反检测
 	}
-	
+
 	instance, err := browser.Connect(ctx, opts)
 	if err != nil {
 		fmt.Printf("  ❌ 连接失败: %v\n", err)
 		return
 	}
 	defer instance.Close()
-	
+
 	page := instance.Page()
-	
+
 	// 访问抖音充值页面
 	fmt.Println("  [导航] 访问 https://www.douyin.com/pay ...")
 	if err := page.Navigate("https://www.douyin.com/pay"); err != nil {
 		fmt.Printf("  ❌ 导航失败: %v\n", err)
 		return
 	}
-	
+
 	// 等待页面加载
 	time.Sleep(3 * time.Second)
-	
+
 	// 检测是否被识别为自动化
 	fmt.Println("  [检测] 检查浏览器指纹...")
 	result, err := page.Evaluate(`
@@ -80,18 +80,18 @@ func testWithoutStealth(ctx context.Context) {
 			};
 		})()
 	`)
-	
+
 	if err != nil {
 		fmt.Printf("  ⚠️  检测脚本执行失败: %v\n", err)
 	} else {
 		fmt.Printf("  📋 检测结果:\n")
 		fmt.Printf("      %+v\n", result)
 	}
-	
+
 	// 获取页面标题
 	title, _ := page.Evaluate("document.title")
 	fmt.Printf("  📄 页面标题: %v\n", title)
-	
+
 	// 等待观察
 	fmt.Println("  ⏳ 保持 10 秒观察页面反应...")
 	fmt.Println("     (请查看浏览器窗口，是否有验证码或警告)")
@@ -100,7 +100,7 @@ func testWithoutStealth(ctx context.Context) {
 
 func testWithStealth(ctx context.Context) {
 	fmt.Println("  [配置] 启用完整反检测...")
-	
+
 	opts := &browser.ConnectOptions{
 		Headless:     false, // 可视化观察
 		UseCustomCDP: true,  // 启用反检测
@@ -111,26 +111,26 @@ func testWithStealth(ctx context.Context) {
 			"--exclude-switches=enable-automation",
 		},
 	}
-	
+
 	instance, err := browser.Connect(ctx, opts)
 	if err != nil {
 		fmt.Printf("  ❌ 连接失败: %v\n", err)
 		return
 	}
 	defer instance.Close()
-	
+
 	page := instance.Page()
-	
+
 	// 访问抖音充值页面
 	fmt.Println("  [导航] 访问 https://www.douyin.com/pay ...")
 	if err := page.Navigate("https://www.douyin.com/pay"); err != nil {
 		fmt.Printf("  ❌ 导航失败: %v\n", err)
 		return
 	}
-	
+
 	// 等待页面加载
 	time.Sleep(3 * time.Second)
-	
+
 	// 检测是否成功隐藏
 	fmt.Println("  [检测] 检查浏览器指纹...")
 	result, err := page.Evaluate(`
@@ -150,23 +150,24 @@ func testWithStealth(ctx context.Context) {
 			};
 		})()
 	`)
-	
+
 	if err != nil {
 		fmt.Printf("  ⚠️  检测脚本执行失败: %v\n", err)
 	} else {
 		fmt.Printf("  📋 检测结果:\n")
 		fmt.Printf("      %+v\n", result)
 	}
-	
+
 	// 获取页面标题
 	title, _ := page.Evaluate("document.title")
 	fmt.Printf("  📄 页面标题: %v\n", title)
-	
+
 	// 等待观察
 	fmt.Println("  ⏳ 保持 15 秒观察页面反应...")
 	fmt.Println("     (请查看浏览器窗口，对比两次测试的差异)")
 	time.Sleep(15 * time.Second)
-	
+
 	fmt.Println("  ✅ 测试完成")
 }
+
 

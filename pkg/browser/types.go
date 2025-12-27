@@ -112,10 +112,41 @@ type Page interface {
 // Use type assertion to access these methods: page.(*CDPPage).ClickSelector(...)
 type PageWithSelector interface {
 	Page
+
+	// 选择器操作
 	ClickSelector(selector string) error     // 原生 chromedp 点击
 	RealClickSelector(selector string) error // 拟人化贝塞尔曲线点击
 	SendKeys(selector, text string) error    // 原生 chromedp 输入
 	RealSendKeys(text string) error          // 真实键盘输入（需先获取焦点）
+
+	// 等待方法
+	WaitVisible(selector string, timeout time.Duration) error    // 等待元素可见
+	WaitNotVisible(selector string, timeout time.Duration) error // 等待元素消失
+	Has(selector string) (bool, error)                           // 元素存在检查
+
+	// Cookie/Storage 管理
+	SetCookies(cookiesJSON string, url string) error // 设置 cookies
+	GetCookies() (string, error)                     // 获取 cookies (JSON 格式)
+	ClearCookies() error                             // 清除 cookies
+	SetLocalStorage(dataJSON string) error           // 设置 localStorage
+	GetLocalStorage() (string, error)                // 获取 localStorage
+	SetSessionStorage(dataJSON string) error         // 设置 sessionStorage
+	GetSessionStorage() (string, error)              // 获取 sessionStorage
+
+	// 截图
+	ScreenshotElement(selector string) ([]byte, error) // 元素截图
+	ScreenshotQrcode(selector string) (string, error)  // 二维码截图(base64)
+
+	// 导航
+	NavigateWithOptions(url string, opts *NavigateOptions) error // 带选项导航
+	NavigateWithReferrer(url, referrer string) error             // 带 Referrer 导航
+	Refresh(timeout time.Duration) error                         // 刷新页面
+
+	// 便捷方法
+	ExecuteJS(script string, result interface{}) error // 执行 JS
+	Sleep(duration time.Duration)                      // 等待
+	GetContext() context.Context                       // 获取 chromedp 上下文
+
 }
 
 // RequestHandler is a function type for handling intercepted requests
