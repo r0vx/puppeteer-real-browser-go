@@ -564,8 +564,33 @@ func (p *CustomCDPPage) initialize() error {
 	}
 
 	// CRITICAL: Inject stealth script on new document WITHOUT Runtime.Enable
-	// Note: Error.prepareStackTrace has been disabled in GetAdvancedStealthScript
-	script := GetAdvancedStealthScript()
+	var script string
+	// 检查是否指定了用户ID
+	if p.opts != nil && p.opts.FingerprintUserID != "" {
+		// 使用 UserFingerprintManager 获取或生成指纹
+		fingerprintDir := p.opts.FingerprintDir
+		if fingerprintDir == "" {
+			fingerprintDir = "./fingerprints"
+		}
+		manager, err := NewUserFingerprintManager(fingerprintDir)
+		if err == nil {
+			// 提取初始化参数（Width、Height、UserAgent）
+			initParams := GetInitParamsFromOptions(p.opts)
+			config, err := manager.GetOrCreateUserFingerprint(p.opts.FingerprintUserID, initParams)
+			if err == nil {
+				// 使用缓存的脚本（基于 userID）
+				script = GetCachedStealthScriptWithConfig(config)
+			}
+		}
+		// 如果获取失败，使用默认脚本
+		if script == "" {
+			script = GetCachedAdvancedStealthScript()
+		}
+	} else {
+		// 使用默认的高级 stealth 脚本（缓存版本）
+		script = GetCachedAdvancedStealthScript()
+	}
+
 	_, err := p.client.sendCommand("Page.addScriptToEvaluateOnNewDocument", map[string]interface{}{
 		"source": script,
 	})

@@ -103,9 +103,34 @@ func (p *CDPPage) initialize() error {
 		// Set up additional stealth configurations
 		p.setupAdditionalStealth(),
 
-		// CRITICAL: Inject MINIMAL stealth script (only MouseEvent fix like original)
+		// CRITICAL: Inject stealth script
 		chromedp.ActionFunc(func(ctx context.Context) error {
-			script := GetSimpleStealthScript()
+			var script string
+			// 检查是否指定了用户ID
+			if p.opts != nil && p.opts.FingerprintUserID != "" {
+				// 使用 UserFingerprintManager 获取或生成指纹
+				fingerprintDir := p.opts.FingerprintDir
+				if fingerprintDir == "" {
+					fingerprintDir = "./fingerprints"
+				}
+				manager, err := NewUserFingerprintManager(fingerprintDir)
+				if err == nil {
+					// 提取初始化参数（Width、Height、UserAgent）
+					initParams := GetInitParamsFromOptions(p.opts)
+					config, err := manager.GetOrCreateUserFingerprint(p.opts.FingerprintUserID, initParams)
+					if err == nil {
+						// 使用缓存的脚本（基于 userID）
+						script = GetCachedStealthScriptWithConfig(config)
+					}
+				}
+				// 如果获取失败，使用缓存的默认脚本
+				if script == "" {
+					script = GetCachedSimpleStealthScript()
+				}
+			} else {
+				// 使用缓存的简单 stealth 脚本
+				script = GetCachedSimpleStealthScript()
+			}
 			_, err := page.AddScriptToEvaluateOnNewDocument(script).Do(ctx)
 			return err
 		}),

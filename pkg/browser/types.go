@@ -55,6 +55,22 @@ type ConnectOptions struct {
 	// Profile/Account management
 	ProfileName    string `json:"profileName"`    // Unique profile name for this account
 	PersistProfile bool   `json:"persistProfile"` // Whether to persist user data or .crx files
+
+	// FingerprintUserID for generating consistent fingerprint per user
+	// If set, generates fingerprint based on this user ID and persists to file
+	// 指定用户ID，自动生成一致的指纹配置并持久化
+	FingerprintUserID string `json:"fingerprintUserID"`
+
+	// FingerprintDir specifies the directory for fingerprint config files
+	// Default: "./fingerprints"
+	// 指纹配置文件保存目录
+	FingerprintDir string `json:"fingerprintDir"`
+
+	// Screen and UserAgent settings - used when creating new fingerprint config
+	// 屏幕和 UserAgent 设置 - 创建新指纹配置时使用
+	Width     int    `json:"width"`     // 屏幕宽度
+	Height    int    `json:"height"`    // 屏幕高度
+	UserAgent string `json:"userAgent"` // UserAgent
 }
 
 // ProxyConfig contains proxy server configuration

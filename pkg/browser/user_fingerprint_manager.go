@@ -17,6 +17,22 @@ type UserFingerprintManager struct {
 	mutex           sync.RWMutex                  // 读写锁
 }
 
+// GetInitParamsFromOptions 从 ConnectOptions 提取指纹初始化参数
+func GetInitParamsFromOptions(opts *ConnectOptions) *FingerprintInitParams {
+	if opts == nil {
+		return nil
+	}
+	// 只有指定了参数才返回
+	if opts.Width == 0 && opts.Height == 0 && opts.UserAgent == "" {
+		return nil
+	}
+	return &FingerprintInitParams{
+		Width:     opts.Width,
+		Height:    opts.Height,
+		UserAgent: opts.UserAgent,
+	}
+}
+
 // NewUserFingerprintManager 创建用户指纹管理器
 func NewUserFingerprintManager(configDir string) (*UserFingerprintManager, error) {
 	// 确保配置目录存在
@@ -31,8 +47,22 @@ func NewUserFingerprintManager(configDir string) (*UserFingerprintManager, error
 	}, nil
 }
 
-// GetUserFingerprint 获取用户指纹配置
+// FingerprintInitParams 指纹初始化参数
+type FingerprintInitParams struct {
+	Width     int    // 屏幕宽度
+	Height    int    // 屏幕高度
+	UserAgent string // UserAgent
+}
+
+// GetUserFingerprint 获取用户指纹配置（无初始化参数）
 func (ufm *UserFingerprintManager) GetUserFingerprint(userID string) (*FingerprintConfig, error) {
+	return ufm.GetOrCreateUserFingerprint(userID, nil)
+}
+
+// GetOrCreateUserFingerprint 获取或创建用户指纹配置
+// 如果配置已存在，直接返回（不应用 initParams）
+// 如果配置不存在，使用 initParams 创建新配置
+func (ufm *UserFingerprintManager) GetOrCreateUserFingerprint(userID string, initParams *FingerprintInitParams) (*FingerprintConfig, error) {
 	ufm.mutex.RLock()
 	
 	// 检查缓存
@@ -57,6 +87,21 @@ func (ufm *UserFingerprintManager) GetUserFingerprint(userID string) (*Fingerpri
 	
 	// 生成新的指纹配置
 	config := ufm.generator.GenerateFingerprint(userID)
+	
+	// 应用初始化参数（仅在新建时生效）
+	if initParams != nil {
+		if initParams.Width > 0 {
+			config.Screen.Width = initParams.Width
+			config.Screen.AvailWidth = initParams.Width
+		}
+		if initParams.Height > 0 {
+			config.Screen.Height = initParams.Height
+			config.Screen.AvailHeight = initParams.Height - 72 // 留出任务栏空间
+		}
+		if initParams.UserAgent != "" {
+			config.Browser.UserAgent = initParams.UserAgent
+		}
+	}
 	
 	// 保存到文件
 	if err := ufm.saveConfigToFile(config, configPath); err != nil {

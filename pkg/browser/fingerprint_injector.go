@@ -513,67 +513,87 @@ func (fi *FingerprintInjector) generateWebGLScript() string {
 }
 
 // generateCanvasScript 生成Canvas修改脚本
+// 使用确定性噪声：基于 userID 生成固定的噪声种子，确保同一用户指纹一致
 func (fi *FingerprintInjector) generateCanvasScript() string {
+	// 基于 userID 生成确定性种子
+	seed := fi.hashUserID(fi.config.UserID + "canvas")
+	
 	return fmt.Sprintf(`
-    // 修改Canvas指纹
-    const toDataURL = HTMLCanvasElement.prototype.toDataURL;
-    const getImageData = CanvasRenderingContext2D.prototype.getImageData;
-    
-    HTMLCanvasElement.prototype.toDataURL = function(type) {
-        const originalResult = toDataURL.call(this, type);
+    // 修改Canvas指纹 - 使用确定性噪声
+    (function() {
+        const originalToDataURL = HTMLCanvasElement.prototype.toDataURL;
+        const originalGetImageData = CanvasRenderingContext2D.prototype.getImageData;
+        const originalToBlob = HTMLCanvasElement.prototype.toBlob;
         
-        // 添加随机噪音
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d');
-        canvas.width = this.width;
-        canvas.height = this.height;
+        // 确定性随机数生成器（基于用户种子）
+        const userSeed = %d;
+        let seedState = userSeed;
+        function seededRandom() {
+            seedState = (seedState * 1103515245 + 12345) & 0x7fffffff;
+            return (seedState / 0x7fffffff);
+        }
         
-        const img = new Image();
-        img.onload = function() {
-            ctx.drawImage(img, 0, 0);
-            
-            // 添加微小的噪音
-            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-            const data = imageData.data;
-            const noiseLevel = %.6f;
-            
+        const noiseLevel = %.6f;
+        const variance = %d;
+        
+        // 添加确定性噪声
+        function addNoise(data) {
+            // 重置种子以确保每次调用结果一致
+            seedState = userSeed;
             for (let i = 0; i < data.length; i += 4) {
-                if (Math.random() < noiseLevel) {
-                    data[i] += Math.floor(Math.random() * %d) - %d;     // R
-                    data[i + 1] += Math.floor(Math.random() * %d) - %d; // G  
-                    data[i + 2] += Math.floor(Math.random() * %d) - %d; // B
+                if (seededRandom() < noiseLevel) {
+                    const r = Math.floor(seededRandom() * variance) - Math.floor(variance / 2);
+                    const g = Math.floor(seededRandom() * variance) - Math.floor(variance / 2);
+                    const b = Math.floor(seededRandom() * variance) - Math.floor(variance / 2);
+                    data[i] = Math.max(0, Math.min(255, data[i] + r));
+                    data[i + 1] = Math.max(0, Math.min(255, data[i + 1] + g));
+                    data[i + 2] = Math.max(0, Math.min(255, data[i + 2] + b));
                 }
-            }
-            
-            ctx.putImageData(imageData, 0, 0);
-        };
-        img.src = originalResult;
-        
-        return originalResult;
-    };
-    
-    CanvasRenderingContext2D.prototype.getImageData = function(sx, sy, sw, sh) {
-        const imageData = getImageData.call(this, sx, sy, sw, sh);
-        
-        // 为getImageData也添加少量噪音
-        const data = imageData.data;
-        const noiseLevel = %.6f * 0.1; // 更小的噪音
-        
-        for (let i = 0; i < data.length; i += 4) {
-            if (Math.random() < noiseLevel) {
-                data[i] += Math.floor(Math.random() * 3) - 1;     // R
-                data[i + 1] += Math.floor(Math.random() * 3) - 1; // G
-                data[i + 2] += Math.floor(Math.random() * 3) - 1; // B
             }
         }
         
-        return imageData;
-    };`,
+        // 重写 toDataURL - 同步方式
+        HTMLCanvasElement.prototype.toDataURL = function(type, quality) {
+            if (this.width > 0 && this.height > 0) {
+                try {
+                    const ctx = this.getContext('2d');
+                    if (ctx) {
+                        const imageData = originalGetImageData.call(ctx, 0, 0, this.width, this.height);
+                        addNoise(imageData.data);
+                        ctx.putImageData(imageData, 0, 0);
+                    }
+                } catch(e) {}
+            }
+            return originalToDataURL.call(this, type, quality);
+        };
+        
+        // 重写 getImageData
+        CanvasRenderingContext2D.prototype.getImageData = function(sx, sy, sw, sh) {
+            const imageData = originalGetImageData.call(this, sx, sy, sw, sh);
+            addNoise(imageData.data);
+            return imageData;
+        };
+        
+        // 重写 toBlob
+        if (originalToBlob) {
+            HTMLCanvasElement.prototype.toBlob = function(callback, type, quality) {
+                if (this.width > 0 && this.height > 0) {
+                    try {
+                        const ctx = this.getContext('2d');
+                        if (ctx) {
+                            const imageData = originalGetImageData.call(ctx, 0, 0, this.width, this.height);
+                            addNoise(imageData.data);
+                            ctx.putImageData(imageData, 0, 0);
+                        }
+                    } catch(e) {}
+                }
+                return originalToBlob.call(this, callback, type, quality);
+            };
+        }
+    })();`,
+		seed,
 		fi.config.Canvas.NoiseLevel,
-		fi.config.Canvas.TextVariance*2, fi.config.Canvas.TextVariance,
-		fi.config.Canvas.TextVariance*2, fi.config.Canvas.TextVariance,
-		fi.config.Canvas.TextVariance*2, fi.config.Canvas.TextVariance,
-		fi.config.Canvas.NoiseLevel)
+		fi.config.Canvas.TextVariance*2+1)
 }
 
 // generateAudioScript 生成AudioContext修改脚本
