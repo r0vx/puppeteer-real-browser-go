@@ -71,6 +71,16 @@ type ConnectOptions struct {
 	Width     int    `json:"width"`     // 屏幕宽度
 	Height    int    `json:"height"`    // 屏幕高度
 	UserAgent string `json:"userAgent"` // UserAgent
+
+	// Language settings - used when creating new fingerprint config
+	// 语言设置 - 创建新指纹配置时使用
+	Language  string   `json:"language"`  // 主语言，如 "zh-CN"
+	Languages []string `json:"languages"` // 语言列表，如 ["zh-CN", "zh", "en"]
+
+	// Timezone settings - used when creating new fingerprint config
+	// 时区设置 - 创建新指纹配置时使用
+	Timezone       string `json:"timezone"`       // 时区名称，如 "Asia/Shanghai"
+	TimezoneOffset int    `json:"timezoneOffset"` // 时区偏移（分钟），如 480 表示 UTC+8
 }
 
 // ProxyConfig contains proxy server configuration

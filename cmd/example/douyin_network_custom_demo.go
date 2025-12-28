@@ -17,16 +17,22 @@ import (
 func main() {
 	fmt.Println("🎯 抖音二维码 API 监听 (CustomCDP)")
 	fmt.Println("=====================================")
-	fmt.Println("监听: web/get_qrcode/")
+	fmt.Println("监听: get_qrcode, check_qrconnect")
 	fmt.Println("⚡ 使用 UseCustomCDP: true")
 	fmt.Println()
 
 	ctx := context.Background()
 
 	opts := &browser.ConnectOptions{
-		Headless:     false,
-		UseCustomCDP: true, // 使用自定义 CDP
-		Args:         []string{"--window-size=1280,720"},
+		Headless:          false,
+		UseCustomCDP:      true,
+		FingerprintUserID: "douyin_qrcode_test",
+		FingerprintDir:    "./fingerprints",
+		Language:          "zh-CN",
+		Languages:         []string{"zh-CN", "zh", "en"},
+		Args: []string{
+			"--window-size=1920,1080",
+			"--start-maximized"},
 	}
 
 	fmt.Println("🚀 启动浏览器...")
@@ -53,9 +59,20 @@ func main() {
 
 	// 监听网络请求
 	customPage.OnNetworkRequest(func(requestID, url, method string) {
-		// 过滤 web/get_qrcode/ 请求
-		if strings.Contains(url, "web/get_qrcode") {
-			fmt.Printf("\n🎯 捕获请求: [%s] %s\n", method, url)
+		if method == "OPTIONS" || method == "HEAD" {
+			return
+		}
+
+		// 过滤 get_qrcode 和 check_qrconnect 请求
+		if strings.Contains(url, "get_qrcode") || strings.Contains(url, "check_qrconnect") {
+			// 提取 API 名称
+			apiName := "unknown"
+			if strings.Contains(url, "get_qrcode") {
+				apiName = "get_qrcode"
+			} else if strings.Contains(url, "check_qrconnect") {
+				apiName = "check_qrconnect"
+			}
+			fmt.Printf("\n🎯 [%s] 捕获请求: [%s] \n", apiName, method)
 			requestsMu.Lock()
 			requests[requestID] = struct {
 				URL    string
@@ -80,20 +97,24 @@ func main() {
 				return
 			}
 
-			fmt.Println("\n" + strings.Repeat("=", 60))
-			fmt.Printf("📦 二维码 API 响应\n")
-			fmt.Println(strings.Repeat("=", 60))
+			// 提取 API 名称
+			apiName := "unknown"
+			if strings.Contains(req.URL, "get_qrcode") {
+				apiName = "🔑 get_qrcode"
+			} else if strings.Contains(req.URL, "check_qrconnect") {
+				apiName = "🔄 check_qrconnect"
+			}
+
+			fmt.Println("\n" + strings.Repeat("=", 70))
+			fmt.Printf("📦 %s 响应\n", apiName)
+			fmt.Println(strings.Repeat("=", 70))
 			fmt.Printf("URL: %s\n", req.URL)
 			fmt.Printf("Method: %s\n", req.Method)
 			fmt.Printf("Body: %d bytes\n", len(body))
-			fmt.Println(strings.Repeat("-", 60))
-			// 只显示前 500 字符
-			if len(body) > 500 {
-				fmt.Printf("%s...(truncated)\n", string(body[:500]))
-			} else {
-				fmt.Println(string(body))
-			}
-			fmt.Println(strings.Repeat("=", 60))
+			fmt.Println(strings.Repeat("-", 70))
+			// 显示完整 JSON（格式化输出）
+			fmt.Println(string(body))
+			fmt.Println(strings.Repeat("=", 70))
 		}
 	})
 
@@ -109,10 +130,10 @@ func main() {
 		log.Fatalf("❌ 导航失败: %v", err)
 	}
 
-	fmt.Println("\n⏳ 等待二维码 API... (60秒)")
-	fmt.Println("💡 提示: 二维码会自动刷新，每次刷新都会触发 API")
-	fmt.Println("⚠️ 注意: UseCustomCDP: true 可能丢失部分请求")
-	time.Sleep(60 * time.Second)
+	fmt.Println("\n⏳ 等待二维码 API... (120秒)")
+	fmt.Println("💡 提示: get_qrcode 获取二维码，check_qrconnect 检查扫码状态")
+	fmt.Println("📱 请使用抖音 APP 扫描二维码登录")
+	time.Sleep(2000 * time.Second)
 
 	fmt.Println("\n✅ 测试完成!")
 }

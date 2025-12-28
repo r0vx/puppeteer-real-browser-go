@@ -23,13 +23,17 @@ func GetInitParamsFromOptions(opts *ConnectOptions) *FingerprintInitParams {
 		return nil
 	}
 	// 只有指定了参数才返回
-	if opts.Width == 0 && opts.Height == 0 && opts.UserAgent == "" {
+	if opts.Width == 0 && opts.Height == 0 && opts.UserAgent == "" && opts.Language == "" && len(opts.Languages) == 0 && opts.Timezone == "" && opts.TimezoneOffset == 0 {
 		return nil
 	}
 	return &FingerprintInitParams{
-		Width:     opts.Width,
-		Height:    opts.Height,
-		UserAgent: opts.UserAgent,
+		Width:          opts.Width,
+		Height:         opts.Height,
+		UserAgent:      opts.UserAgent,
+		Language:       opts.Language,
+		Languages:      opts.Languages,
+		Timezone:       opts.Timezone,
+		TimezoneOffset: opts.TimezoneOffset,
 	}
 }
 
@@ -49,9 +53,13 @@ func NewUserFingerprintManager(configDir string) (*UserFingerprintManager, error
 
 // FingerprintInitParams 指纹初始化参数
 type FingerprintInitParams struct {
-	Width     int    // 屏幕宽度
-	Height    int    // 屏幕高度
-	UserAgent string // UserAgent
+	Width          int      // 屏幕宽度
+	Height         int      // 屏幕高度
+	UserAgent      string   // UserAgent
+	Language       string   // 主语言，如 "zh-CN"
+	Languages      []string // 语言列表，如 ["zh-CN", "zh", "en"]
+	Timezone       string   // 时区名称，如 "Asia/Shanghai"
+	TimezoneOffset int      // 时区偏移（分钟），如 480 表示 UTC+8，0 表示未设置
 }
 
 // GetUserFingerprint 获取用户指纹配置（无初始化参数）
@@ -100,6 +108,25 @@ func (ufm *UserFingerprintManager) GetOrCreateUserFingerprint(userID string, ini
 		}
 		if initParams.UserAgent != "" {
 			config.Browser.UserAgent = initParams.UserAgent
+		}
+		if initParams.Language != "" {
+			config.Browser.Language = initParams.Language
+		}
+		if len(initParams.Languages) > 0 {
+			config.Browser.Languages = initParams.Languages
+		}
+		// 时区设置
+		if initParams.Timezone != "" {
+			config.Timezone.Timezone = initParams.Timezone
+		}
+		if initParams.TimezoneOffset != 0 {
+			config.Timezone.Offset = initParams.TimezoneOffset
+		}
+		// 如果设置了语言但没设置时区，自动匹配时区
+		if initParams.Language != "" && initParams.Timezone == "" && initParams.TimezoneOffset == 0 {
+			tz, offset := getTimezoneForLanguage(initParams.Language)
+			config.Timezone.Timezone = tz
+			config.Timezone.Offset = offset
 		}
 	}
 	
@@ -413,4 +440,57 @@ func ConnectWithFingerprint(ctx interface{}, opts *ConnectOptionsWithFingerprint
 	// 使用修改后的选项连接浏览器
 	// 注意：这里需要实际的Connect函数实现
 	return nil, fmt.Errorf("Connect function not implemented - please use the actual browser connection method")
+}
+
+// getTimezoneForLanguage 根据语言返回匹配的时区
+// 返回时区名称和偏移量（分钟）
+func getTimezoneForLanguage(lang string) (timezone string, offset int) {
+	// 语言到时区的映射
+	languageTimezones := map[string]struct {
+		tz     string
+		offset int
+	}{
+		"zh-CN": {"Asia/Shanghai", 480},      // UTC+8
+		"zh-TW": {"Asia/Taipei", 480},        // UTC+8
+		"zh-HK": {"Asia/Hong_Kong", 480},     // UTC+8
+		"ja":    {"Asia/Tokyo", 540},         // UTC+9
+		"ja-JP": {"Asia/Tokyo", 540},         // UTC+9
+		"ko":    {"Asia/Seoul", 540},         // UTC+9
+		"ko-KR": {"Asia/Seoul", 540},         // UTC+9
+		"en-US": {"America/New_York", -300},  // UTC-5 (EST)
+		"en-GB": {"Europe/London", 0},        // UTC+0
+		"en-AU": {"Australia/Sydney", 600},   // UTC+10
+		"de":    {"Europe/Berlin", 60},       // UTC+1
+		"de-DE": {"Europe/Berlin", 60},       // UTC+1
+		"fr":    {"Europe/Paris", 60},        // UTC+1
+		"fr-FR": {"Europe/Paris", 60},        // UTC+1
+		"es":    {"Europe/Madrid", 60},       // UTC+1
+		"es-ES": {"Europe/Madrid", 60},       // UTC+1
+		"pt":    {"Europe/Lisbon", 0},        // UTC+0
+		"pt-BR": {"America/Sao_Paulo", -180}, // UTC-3
+		"ru":    {"Europe/Moscow", 180},      // UTC+3
+		"ru-RU": {"Europe/Moscow", 180},      // UTC+3
+		"ar":    {"Asia/Riyadh", 180},        // UTC+3
+		"th":    {"Asia/Bangkok", 420},       // UTC+7
+		"th-TH": {"Asia/Bangkok", 420},       // UTC+7
+		"vi":    {"Asia/Ho_Chi_Minh", 420},   // UTC+7
+		"vi-VN": {"Asia/Ho_Chi_Minh", 420},   // UTC+7
+		"id":    {"Asia/Jakarta", 420},       // UTC+7
+		"id-ID": {"Asia/Jakarta", 420},       // UTC+7
+	}
+
+	if tz, ok := languageTimezones[lang]; ok {
+		return tz.tz, tz.offset
+	}
+
+	// 尝试使用语言前缀匹配
+	if len(lang) >= 2 {
+		prefix := lang[:2]
+		if tz, ok := languageTimezones[prefix]; ok {
+			return tz.tz, tz.offset
+		}
+	}
+
+	// 默认返回 UTC
+	return "UTC", 0
 }
