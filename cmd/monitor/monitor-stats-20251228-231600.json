@@ -1,0 +1,18 @@
+{
+  "timestamp": "2025-12-28T23:16:00.662668+08:00",
+  "uptime": 82001112584,
+  "num_goroutine": 102,
+  "memory_alloc_mb": 5.75146484375,
+  "memory_sys_mb": 18.39282989501953,
+  "memory_usage_percent": 31.27014644607462,
+  "num_gc": 152,
+  "pool_available": 10,
+  "pool_created": 10,
+  "pool_max_size": 10,
+  "pool_usage_percent": 0,
+  "chrome_processes": 10,
+  "total_requests": 100,
+  "success_requests": 99,
+  "failed_requests": 1,
+  "success_rate": 99
+}

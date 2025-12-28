@@ -160,6 +160,29 @@ func (ufm *UserFingerprintManager) CreateCustomUserFingerprint(userID string, cu
 	return nil
 }
 
+// UpdateUserTimezone 更新用户时区配置
+func (ufm *UserFingerprintManager) UpdateUserTimezone(userID, timezone string, offset int) error {
+	config, err := ufm.GetUserFingerprint(userID)
+	if err != nil {
+		return err
+	}
+	
+	config.Timezone.Timezone = timezone
+	config.Timezone.Offset = offset
+	
+	configPath := ufm.getUserConfigPath(userID)
+	if err := ufm.saveConfigToFile(config, configPath); err != nil {
+		return fmt.Errorf("failed to save config: %v", err)
+	}
+	
+	// 更新缓存
+	ufm.mutex.Lock()
+	ufm.cache[userID] = config
+	ufm.mutex.Unlock()
+	
+	return nil
+}
+
 // UpdateUserFingerprint 更新用户指纹配置
 func (ufm *UserFingerprintManager) UpdateUserFingerprint(userID string, updates map[string]interface{}) error {
 	config, err := ufm.GetUserFingerprint(userID)

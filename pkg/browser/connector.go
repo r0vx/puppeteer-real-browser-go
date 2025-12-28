@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/chromedp/cdproto/dom"
+	"github.com/chromedp/cdproto/emulation"
 	"github.com/chromedp/cdproto/fetch"
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/cdproto/page"
@@ -103,9 +104,12 @@ func (p *CDPPage) initialize() error {
 		// Set up additional stealth configurations
 		p.setupAdditionalStealth(),
 
-		// CRITICAL: Inject stealth script
+		// CRITICAL: Inject stealth script and set UserAgent
 		chromedp.ActionFunc(func(ctx context.Context) error {
 			var script string
+			var userAgent string
+			var platform string
+			
 			// 检查是否指定了用户ID
 			if p.opts != nil && p.opts.FingerprintUserID != "" {
 				// 使用 UserFingerprintManager 获取或生成指纹
@@ -121,6 +125,9 @@ func (p *CDPPage) initialize() error {
 					if err == nil {
 						// 使用缓存的脚本（基于 userID）
 						script = GetCachedStealthScriptWithConfig(config)
+						// 获取 UserAgent 和 Platform
+						userAgent = config.Browser.UserAgent
+						platform = config.Browser.Platform
 					}
 				}
 				// 如果获取失败，使用缓存的默认脚本
@@ -130,7 +137,22 @@ func (p *CDPPage) initialize() error {
 			} else {
 				// 使用缓存的简单 stealth 脚本
 				script = GetCachedSimpleStealthScript()
+				// 如果直接设置了 UserAgent（不使用 FingerprintUserID）
+				if p.opts != nil && p.opts.UserAgent != "" {
+					userAgent = p.opts.UserAgent
+				}
 			}
+			
+			// 设置 HTTP 请求头的 UserAgent（关键！）
+			if userAgent != "" {
+				if err := emulation.SetUserAgentOverride(userAgent).
+					WithPlatform(platform).
+					Do(ctx); err != nil {
+					// 不要失败，只是警告
+					fmt.Printf("⚠️ 设置 UserAgent 失败: %v\n", err)
+				}
+			}
+			
 			_, err := page.AddScriptToEvaluateOnNewDocument(script).Do(ctx)
 			return err
 		}),

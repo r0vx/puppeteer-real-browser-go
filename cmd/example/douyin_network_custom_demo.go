@@ -30,6 +30,11 @@ func main() {
 		FingerprintDir:    "./fingerprints",
 		Language:          "zh-CN",
 		Languages:         []string{"zh-CN", "zh", "en"},
+		UserAgent:         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+		Width:             1920,
+		Height:            1080,
+		Timezone:          "Asia/Shanghai",
+		TimezoneOffset:    480,
 		Args: []string{
 			"--window-size=1920,1080",
 			"--start-maximized"},

@@ -19,8 +19,15 @@ func main() {
 	ctx := context.Background()
 
 	opts := &browser.ConnectOptions{
-		Headless:     false,
-		UseCustomCDP: false,
+		Headless:          false,
+		UseCustomCDP:      true,
+		FingerprintUserID: "douyin_new_user_001", // 新ID
+		FingerprintDir:    "./fingerprints",
+		UserAgent:         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+		Language:          "zh-CN",
+		Languages:         []string{"zh-CN", "zh", "en"}, // 明确指定！
+		Timezone:          "Asia/Shanghai",
+		TimezoneOffset:    480,
 		Args: []string{
 			"--window-size=1920,1080",
 		},
@@ -43,7 +50,7 @@ func main() {
 
 	// ==================== 测试 Navigate ====================
 	fmt.Println("\n📌 测试 1: Navigate 到抖音充值页面")
-	if err := page.Navigate("https://www.douyin.com/pay"); err != nil {
+	if err := page.Navigate("https://www.douyin.com/user/self"); err != nil {
 		fmt.Printf("   ❌ Navigate 失败: %v\n", err)
 	} else {
 		fmt.Println("   ✅ Navigate 成功")
@@ -197,5 +204,5 @@ func main() {
 	fmt.Println("\n================================")
 	fmt.Println("🎉 测试完成!")
 	fmt.Println("⏳ 浏览器保持 3 秒...")
-	time.Sleep(3 * time.Second)
+	time.Sleep(120 * time.Second)
 }

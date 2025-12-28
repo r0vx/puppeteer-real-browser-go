@@ -565,6 +565,9 @@ func (p *CustomCDPPage) initialize() error {
 
 	// CRITICAL: Inject stealth script on new document WITHOUT Runtime.Enable
 	var script string
+	var userAgent string
+	var platform string
+	
 	// 检查是否指定了用户ID
 	if p.opts != nil && p.opts.FingerprintUserID != "" {
 		// 使用 UserFingerprintManager 获取或生成指纹
@@ -580,6 +583,9 @@ func (p *CustomCDPPage) initialize() error {
 			if err == nil {
 				// 使用缓存的脚本（基于 userID）
 				script = GetCachedStealthScriptWithConfig(config)
+				// 获取 UserAgent 和 Platform
+				userAgent = config.Browser.UserAgent
+				platform = config.Browser.Platform
 			}
 		}
 		// 如果获取失败，使用默认脚本
@@ -589,6 +595,24 @@ func (p *CustomCDPPage) initialize() error {
 	} else {
 		// 使用默认的高级 stealth 脚本（缓存版本）
 		script = GetCachedAdvancedStealthScript()
+		// 如果直接设置了 UserAgent（不使用 FingerprintUserID）
+		if p.opts != nil && p.opts.UserAgent != "" {
+			userAgent = p.opts.UserAgent
+		}
+	}
+
+	// 设置 HTTP 请求头的 UserAgent（关键！）
+	if userAgent != "" {
+		params := map[string]interface{}{
+			"userAgent": userAgent,
+		}
+		if platform != "" {
+			params["platform"] = platform
+		}
+		if _, err := p.client.sendCommand("Emulation.setUserAgentOverride", params); err != nil {
+			// 不要失败，只是警告
+			fmt.Printf("⚠️ 设置 UserAgent 失败: %v\n", err)
+		}
 	}
 
 	_, err := p.client.sendCommand("Page.addScriptToEvaluateOnNewDocument", map[string]interface{}{
