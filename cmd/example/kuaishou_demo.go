@@ -38,7 +38,7 @@ func main() {
 
 	opts := &browser.ConnectOptions{
 		Headless:     false,
-		UseCustomCDP: false,
+		UseCustomCDP: true,
 		Turnstile:    false,
 		Args: []string{
 			"--window-size=1920,1080",
@@ -152,7 +152,7 @@ func main() {
 	fmt.Println("\n🎉 快手充值测试完成!")
 
 	fmt.Println("\n⏳ 保持浏览器打开 10 秒...")
-	time.Sleep(10 * time.Second)
+	// time.Sleep(10 * time.Second)
 	fmt.Println("✅ 测试结束!")
 }
 

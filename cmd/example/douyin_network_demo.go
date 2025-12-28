@@ -42,7 +42,7 @@ func main() {
 
 	opts := &browser.ConnectOptions{
 		Headless:     false,
-		UseCustomCDP: false,
+		UseCustomCDP: false, // 网络监听需要标准 chromedp context
 		Turnstile:    false,
 		Args: []string{
 			"--window-size=1920,1080",
@@ -82,7 +82,7 @@ func main() {
 
 	// 导航到页面
 	fmt.Println("\n📂 导航到抖音充值页面...")
-	if err := page.Navigate("https://www.douyin.com/pay"); err != nil {
+	if err := page.Navigate("https://www.douyin.com/user/self"); err != nil {
 		log.Fatalf("❌ 导航失败: %v", err)
 	}
 

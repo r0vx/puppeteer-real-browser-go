@@ -25,6 +25,9 @@ type CustomCDPClient struct {
 	writeMutex     sync.Mutex // 添加写入锁防止并发写入
 	ctx            context.Context
 	cancel         context.CancelFunc
+	// 事件监听
+	eventHandlers      map[string][]func(json.RawMessage)
+	eventHandlersMutex sync.RWMutex
 }
 
 // CDPMessage represents a CDP message
@@ -46,6 +49,12 @@ type CDPError struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
 	Data    string `json:"data,omitempty"`
+}
+
+// CDPEvent represents a CDP event (no ID, has method)
+type CDPEvent struct {
+	Method string          `json:"method"`
+	Params json.RawMessage `json:"params"`
 }
 
 // NewCustomCDPClient creates a new custom CDP client
@@ -81,11 +90,12 @@ func NewCustomCDPClient(debugURL string) (*CustomCDPClient, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	client := &CustomCDPClient{
-		conn:      conn,
-		url:       wsURL,
-		responses: make(map[int64]chan CDPResponse),
-		ctx:       ctx,
-		cancel:    cancel,
+		conn:          conn,
+		url:           wsURL,
+		responses:     make(map[int64]chan CDPResponse),
+		eventHandlers: make(map[string][]func(json.RawMessage)),
+		ctx:           ctx,
+		cancel:        cancel,
 	}
 
 	// Start message handler
@@ -103,22 +113,66 @@ func (c *CustomCDPClient) handleMessages() {
 		case <-c.ctx.Done():
 			return
 		default:
-			var response CDPResponse
-			if err := c.conn.ReadJSON(&response); err != nil {
+			_, message, err := c.conn.ReadMessage()
+			if err != nil {
 				return
 			}
 
-			c.responsesMutex.RLock()
-			if ch, exists := c.responses[response.ID]; exists {
-				select {
-				case ch <- response:
-				case <-time.After(5 * time.Second):
-					// Timeout
+			// 先尝试解析基础结构
+			var base struct {
+				ID     int64  `json:"id"`
+				Method string `json:"method"`
+			}
+			if err := json.Unmarshal(message, &base); err != nil {
+				continue
+			}
+
+			// 有 ID 的是响应
+			if base.ID > 0 {
+				var response CDPResponse
+				if err := json.Unmarshal(message, &response); err == nil {
+					c.responsesMutex.RLock()
+					if ch, exists := c.responses[response.ID]; exists {
+						select {
+						case ch <- response:
+						case <-time.After(5 * time.Second):
+						}
+					}
+					c.responsesMutex.RUnlock()
+				}
+				continue
+			}
+
+			// 有 method 的是事件
+			if base.Method != "" {
+				var event CDPEvent
+				if err := json.Unmarshal(message, &event); err == nil {
+					c.eventHandlersMutex.RLock()
+					// 复制 handlers 避免长时间持锁
+					handlers := make([]func(json.RawMessage), len(c.eventHandlers[event.Method]))
+					copy(handlers, c.eventHandlers[event.Method])
+					c.eventHandlersMutex.RUnlock()
+
+					// 异步执行 handlers，避免阻塞消息循环
+					if len(handlers) > 0 {
+						params := event.Params // 捕获参数
+						go func() {
+							for _, handler := range handlers {
+								handler(params)
+							}
+						}()
+					}
 				}
 			}
-			c.responsesMutex.RUnlock()
 		}
 	}
+}
+
+// OnEvent subscribes to a CDP event
+func (c *CustomCDPClient) OnEvent(method string, handler func(json.RawMessage)) {
+	c.eventHandlersMutex.Lock()
+	c.eventHandlers[method] = append(c.eventHandlers[method], handler)
+	c.eventHandlersMutex.Unlock()
 }
 
 // sendCommand sends a CDP command and waits for response
@@ -510,11 +564,20 @@ func (p *CustomCDPPage) initialize() error {
 	}
 
 	// CRITICAL: Inject stealth script on new document WITHOUT Runtime.Enable
+	// Note: Error.prepareStackTrace has been disabled in GetAdvancedStealthScript
 	script := GetAdvancedStealthScript()
 	_, err := p.client.sendCommand("Page.addScriptToEvaluateOnNewDocument", map[string]interface{}{
 		"source": script,
 	})
 
+	return err
+}
+
+// AddScriptToEvaluateOnNewDocument adds a script to be evaluated on every new document
+func (p *CustomCDPPage) AddScriptToEvaluateOnNewDocument(script string) error {
+	_, err := p.client.sendCommand("Page.addScriptToEvaluateOnNewDocument", map[string]interface{}{
+		"source": script,
+	})
 	return err
 }
 
@@ -994,4 +1057,77 @@ func (p *CustomCDPPage) Sleep(duration time.Duration) {
 // GetContext returns nil for CustomCDPPage (not using chromedp context)
 func (p *CustomCDPPage) GetContext() context.Context {
 	return context.Background()
+}
+
+// EnableNetwork enables network domain for event listening
+func (p *CustomCDPPage) EnableNetwork() error {
+	_, err := p.client.sendCommand("Network.enable", nil)
+	return err
+}
+
+// OnNetworkRequest subscribes to Network.requestWillBeSent events
+func (p *CustomCDPPage) OnNetworkRequest(handler func(requestID, url, method string)) {
+	p.client.OnEvent("Network.requestWillBeSent", func(params json.RawMessage) {
+		var data struct {
+			RequestID string `json:"requestId"`
+			Request   struct {
+				URL    string `json:"url"`
+				Method string `json:"method"`
+			} `json:"request"`
+		}
+		if json.Unmarshal(params, &data) == nil {
+			handler(data.RequestID, data.Request.URL, data.Request.Method)
+		}
+	})
+}
+
+// OnNetworkResponse subscribes to Network.responseReceived events
+func (p *CustomCDPPage) OnNetworkResponse(handler func(requestID, url string, status int)) {
+	p.client.OnEvent("Network.responseReceived", func(params json.RawMessage) {
+		var data struct {
+			RequestID string `json:"requestId"`
+			Response  struct {
+				URL    string `json:"url"`
+				Status int    `json:"status"`
+			} `json:"response"`
+		}
+		if json.Unmarshal(params, &data) == nil {
+			handler(data.RequestID, data.Response.URL, data.Response.Status)
+		}
+	})
+}
+
+// OnNetworkLoadingFinished subscribes to Network.loadingFinished events
+func (p *CustomCDPPage) OnNetworkLoadingFinished(handler func(requestID string)) {
+	p.client.OnEvent("Network.loadingFinished", func(params json.RawMessage) {
+		var data struct {
+			RequestID string `json:"requestId"`
+		}
+		if json.Unmarshal(params, &data) == nil {
+			handler(data.RequestID)
+		}
+	})
+}
+
+// GetResponseBody gets the response body for a request
+func (p *CustomCDPPage) GetResponseBody(requestID string) ([]byte, error) {
+	result, err := p.client.sendCommand("Network.getResponseBody", map[string]interface{}{
+		"requestId": requestID,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var resp struct {
+		Body          string `json:"body"`
+		Base64Encoded bool   `json:"base64Encoded"`
+	}
+	if err := json.Unmarshal(result, &resp); err != nil {
+		return nil, err
+	}
+
+	if resp.Base64Encoded {
+		return base64.StdEncoding.DecodeString(resp.Body)
+	}
+	return []byte(resp.Body), nil
 }

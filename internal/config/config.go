@@ -78,6 +78,7 @@ func GetStealthFlags() []string {
 	return []string{
 		"--no-sandbox",
 		"--disable-dev-shm-usage",
+		"--test-type", // Suppress "unsupported command-line flag" warning
 	}
 }
 

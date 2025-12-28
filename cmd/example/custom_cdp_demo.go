@@ -21,7 +21,7 @@ func main() {
 	// 使用 Custom CDP 模式（最强反检测）
 	opts := &browser.ConnectOptions{
 		Headless:     false,
-		UseCustomCDP: true,  // ⭐ 启用自定义CDP客户端
+		UseCustomCDP: true, // ⭐ 启用自定义CDP客户端
 		Args: []string{
 			"--disable-session-crashed-bubble",
 			"--disable-infobars",
@@ -42,7 +42,7 @@ func main() {
 	// 示例1：基于坐标点击
 	fmt.Println("\n📍 示例1：基于坐标点击")
 	fmt.Println("-" + string(make([]byte, 40)))
-	
+
 	if err := page.Navigate("https://www.google.com"); err != nil {
 		log.Fatalf("❌ 导航失败: %v", err)
 	}
@@ -55,7 +55,7 @@ func main() {
 	// 示例2：使用辅助函数点击选择器
 	fmt.Println("\n🎯 示例2：使用选择器点击（通过辅助函数）")
 	fmt.Println("-" + string(make([]byte, 40)))
-	
+
 	// 使用辅助函数点击选择器
 	fmt.Println("   点击搜索框 (使用选择器)")
 	if err := browser.ClickSelector(page, "textarea[name='q']"); err != nil {
@@ -67,7 +67,7 @@ func main() {
 	// 示例3：输入文本
 	fmt.Println("\n⌨️  示例3：输入文本")
 	fmt.Println("-" + string(make([]byte, 40)))
-	
+
 	searchText := "puppeteer anti-detection"
 	fmt.Printf("   输入搜索词: %s\n", searchText)
 	if err := browser.TypeText(page, "textarea[name='q']", searchText); err != nil {
@@ -81,7 +81,7 @@ func main() {
 	// 示例4：获取元素文本
 	fmt.Println("\n📄 示例4：获取元素文本")
 	fmt.Println("-" + string(make([]byte, 40)))
-	
+
 	title, err := page.GetTitle()
 	if err != nil {
 		fmt.Printf("   ⚠️  获取标题失败: %v\n", err)
@@ -92,7 +92,7 @@ func main() {
 	// 示例5：检查元素是否可见
 	fmt.Println("\n👁️  示例5：检查元素可见性")
 	fmt.Println("-" + string(make([]byte, 40)))
-	
+
 	visible, err := browser.IsElementVisible(page, "textarea[name='q']")
 	if err != nil {
 		fmt.Printf("   ⚠️  检查失败: %v\n", err)
@@ -103,16 +103,16 @@ func main() {
 	// 示例6：访问反检测测试网站
 	fmt.Println("\n🔍 示例6：访问反检测测试网站")
 	fmt.Println("-" + string(make([]byte, 40)))
-	
+
 	testURL := "https://abrahamjuliot.github.io/creepjs/"
 	fmt.Printf("   访问: %s\n", testURL)
-	
+
 	if err := page.Navigate(testURL); err != nil {
 		log.Printf("⚠️  导航失败: %v", err)
 	} else {
 		fmt.Println("   ✅ 页面加载成功")
 		time.Sleep(5 * time.Second)
-		
+
 		// 检查反检测效果
 		checkAntiDetection(page)
 	}
@@ -126,7 +126,7 @@ func main() {
 	fmt.Println("      应该返回: undefined")
 	fmt.Println("   4. 查看Trust Score或检测结果")
 	fmt.Println()
-	
+
 	time.Sleep(30 * time.Second)
 
 	fmt.Println("✅ 演示完成！")
@@ -134,7 +134,7 @@ func main() {
 
 func checkAntiDetection(page browser.Page) {
 	fmt.Println("\n   🔍 反检测检查:")
-	
+
 	// 检查 navigator.webdriver
 	webdriver, err := page.Evaluate("navigator.webdriver")
 	if err == nil {
@@ -144,7 +144,7 @@ func checkAntiDetection(page browser.Page) {
 			fmt.Printf("      ⚠️  navigator.webdriver = %v (暴露了！)\n", webdriver)
 		}
 	}
-	
+
 	// 检查 User-Agent
 	ua, err := page.Evaluate("navigator.userAgent")
 	if err == nil {
@@ -152,19 +152,19 @@ func checkAntiDetection(page browser.Page) {
 			fmt.Printf("      ✅ User-Agent: %s...\n", uaStr[:min(50, len(uaStr))])
 		}
 	}
-	
+
 	// 检查 Plugins
 	pluginCount, err := page.Evaluate("navigator.plugins.length")
 	if err == nil {
 		fmt.Printf("      ✅ Plugins Count: %v\n", pluginCount)
 	}
-	
+
 	// 检查 Languages
 	langs, err := page.Evaluate("navigator.languages")
 	if err == nil {
 		fmt.Printf("      ✅ Languages: %v\n", langs)
 	}
-	
+
 	// 检查 Chrome对象
 	hasChrome, err := page.Evaluate("typeof window.chrome !== 'undefined'")
 	if err == nil && hasChrome == true {
@@ -178,6 +178,3 @@ func min(a, b int) int {
 	}
 	return b
 }
-
-
-

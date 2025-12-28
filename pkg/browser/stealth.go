@@ -161,20 +161,9 @@ func GetAdvancedStealthScript() string {
 			console.error = (...args) => filterAutomationLogs('error', args);
 			
 			// 9. Override Error.stack to hide automation traces
-			const originalPrepareStackTrace = Error.prepareStackTrace;
-			Error.prepareStackTrace = function(error, stack) {
-				if (originalPrepareStackTrace) {
-					const result = originalPrepareStackTrace(error, stack);
-					if (typeof result === 'string') {
-						return result
-							.replace(/chrome-extension:\/\/[^\/]+/g, 'chrome-extension://redacted')
-							.replace(/moz-extension:\/\/[^\/]+/g, 'moz-extension://redacted')
-							.replace(/webkit-masked-url:\/\/[^\/]+/g, 'webkit-masked-url://redacted');
-					}
-					return result;
-				}
-				return stack;
-			};
+			// DISABLED: This breaks some pages (e.g., Douyin QR code)
+			// const originalPrepareStackTrace = Error.prepareStackTrace;
+			// Error.prepareStackTrace = function(error, stack) { ... };
 			
 			// 10. Prevent detection through timing attacks
 			const originalPerformanceNow = performance.now;

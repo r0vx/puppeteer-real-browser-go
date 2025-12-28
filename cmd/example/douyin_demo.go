@@ -70,7 +70,7 @@ func main() {
 
 	// ==================== 测试 WaitVisible (等待充值按钮) ====================
 	fmt.Println("\n📌 测试 4: WaitVisible (等待页面元素)")
-	
+
 	// 先调试看看元素状态
 	debugResult, _ := page.Evaluate(`
 		(function() {
@@ -89,7 +89,7 @@ func main() {
 		})()
 	`)
 	fmt.Printf("   调试 #root 状态: %+v\n", debugResult)
-	
+
 	// 抖音页面用 div 模拟按钮，等待 #root 容器
 	if err := selectorPage.WaitVisible("#root", 10*time.Second); err != nil {
 		fmt.Printf("   ❌ WaitVisible 失败: %v\n", err)
@@ -126,8 +126,8 @@ func main() {
 		fmt.Printf("   ✅ ScreenshotElement 成功: %d bytes\n", len(elemScreenshot))
 	}
 
-	// ==================== 测试 GetCookies ====================
-	fmt.Println("\n📌 测试 8: GetCookies")
+	// ==================== 测试 GetCookies / SetCookies ====================
+	fmt.Println("\n📌 测试 8: Cookies")
 	cookies, err := selectorPage.GetCookies()
 	if err != nil {
 		fmt.Printf("   ❌ GetCookies 失败: %v\n", err)
@@ -137,6 +137,14 @@ func main() {
 			cookiePreview = cookiePreview[:100] + "..."
 		}
 		fmt.Printf("   ✅ GetCookies 成功: %s\n", cookiePreview)
+	}
+
+	// 测试 SetCookies
+	testCookie := `[{"name":"test_cookie","value":"test_value_123","domain":".douyin.com","path":"/"}]`
+	if err := selectorPage.SetCookies(testCookie, "https://www.douyin.com"); err != nil {
+		fmt.Printf("   ❌ SetCookies 失败: %v\n", err)
+	} else {
+		fmt.Println("   ✅ SetCookies 成功")
 	}
 
 	// ==================== 测试 SetLocalStorage / GetLocalStorage ====================
