@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -80,6 +81,26 @@ func GetStealthFlags() []string {
 		"--disable-dev-shm-usage",
 		"--test-type", // Suppress "unsupported command-line flag" warning
 	}
+}
+
+// GetCacheFlags returns flags for optimizing browser cache
+// 缓存优化参数 - 显著提升页面加载速度
+func GetCacheFlags(cacheDir string, cacheSizeMB int) []string {
+	flags := []string{
+		// 启用激进缓存模式
+		"--aggressive-cache-discard=false",
+		// 磁盘缓存大小 (字节)
+		"--disk-cache-size=" + fmt.Sprintf("%d", cacheSizeMB*1024*1024),
+		// 媒体缓存大小
+		"--media-cache-size=" + fmt.Sprintf("%d", cacheSizeMB*1024*1024/2),
+	}
+	
+	// 如果指定了缓存目录
+	if cacheDir != "" {
+		flags = append(flags, "--disk-cache-dir="+cacheDir)
+	}
+	
+	return flags
 }
 
 // GetHeadlessFlags returns flags for headless mode

@@ -211,6 +211,17 @@ func (cl *ChromeLauncher) buildChromeFlags(opts *ConnectOptions, port int) ([]st
 			proxyFlags := config.GetProxyFlags(opts.Proxy.Host, opts.Proxy.Port)
 			flags = append(flags, proxyFlags...)
 		}
+
+		// Add cache flags if enabled (default: enabled with 500MB)
+		// 默认启用缓存，500MB（共享缓存，静态资源无风控风险）
+		if !opts.EnableCache || opts.CacheSizeMB > 0 {
+			cacheSizeMB := opts.CacheSizeMB
+			if cacheSizeMB <= 0 {
+				cacheSizeMB = 500 // 默认 500MB
+			}
+			cacheFlags := config.GetCacheFlags(opts.CacheDir, cacheSizeMB)
+			flags = append(flags, cacheFlags...)
+		}
 	}
 
 	return flags, nil

@@ -81,6 +81,12 @@ type ConnectOptions struct {
 	// 时区设置 - 创建新指纹配置时使用
 	Timezone       string `json:"timezone"`       // 时区名称，如 "Asia/Shanghai"
 	TimezoneOffset int    `json:"timezoneOffset"` // 时区偏移（分钟），如 480 表示 UTC+8
+
+	// Cache settings - optimize page load performance
+	// 缓存设置 - 优化页面加载性能
+	EnableCache  bool   `json:"enableCache"`  // 启用磁盘缓存（默认 true）
+	CacheDir     string `json:"cacheDir"`     // 缓存目录（留空使用 user-data-dir 下的默认位置）
+	CacheSizeMB  int    `json:"cacheSizeMB"`  // 缓存大小 MB（默认 500MB）
 }
 
 // ProxyConfig contains proxy server configuration
@@ -236,4 +242,10 @@ type XvfbSession interface {
 	Stop() error
 	IsRunning() bool
 	GetDisplay() string
+}
+
+// Sleep pauses execution for the specified duration
+// 类似 chromedp.Sleep，可直接调用 browser.Sleep(2*time.Second)
+func Sleep(d time.Duration) {
+	time.Sleep(d)
 }
