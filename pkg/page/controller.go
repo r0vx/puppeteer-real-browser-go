@@ -32,7 +32,7 @@ func (pc *Controller) Initialize() error {
 	}
 
 	// Wait a bit for the page to be ready
-	time.Sleep(1 * time.Second)
+	//time.Sleep(1 * time.Second)
 
 	// Inject realistic mouse movement scripts
 	script := `
@@ -185,7 +185,7 @@ func (pc *Controller) Type(selector, text string) error {
 		}
 
 		// Random delay between characters (50-150ms)
-		delay := time.Duration(rand.Intn(100)+50) * time.Millisecond
+		delay := time.Duration(rand.Intn(50)+10) * time.Millisecond
 		time.Sleep(delay)
 	}
 
@@ -205,7 +205,7 @@ func (pc *Controller) WaitForElement(selector string, timeout time.Duration) err
 			return nil
 		}
 
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
 	}
 
 	return fmt.Errorf("element %s not found within timeout", selector)

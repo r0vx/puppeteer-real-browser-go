@@ -215,7 +215,7 @@ func (s *Solver) clickElement(x, y float64) {
 	s.page.Click(randomX, randomY)
 
 	// Wait a bit after clicking
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(100 * time.Millisecond)
 }
 
 // interactWithIframe attempts to interact with iframe content

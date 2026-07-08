@@ -94,12 +94,12 @@ func GetCacheFlags(cacheDir string, cacheSizeMB int) []string {
 		// 媒体缓存大小
 		"--media-cache-size=" + fmt.Sprintf("%d", cacheSizeMB*1024*1024/2),
 	}
-	
+
 	// 如果指定了缓存目录
 	if cacheDir != "" {
 		flags = append(flags, "--disk-cache-dir="+cacheDir)
 	}
-	
+
 	return flags
 }
 
@@ -125,7 +125,7 @@ func GetHeadlessFlags(headless interface{}) []string {
 func GetDefaultExtensionPaths() []string {
 	// 返回默认的扩展路径 - 使用未打包扩展目录（ChromeDP要求）
 	return []string{
-		"examples/path/Extensions/kfjglmgfjedhhcddpfgfogkahmenikan/1.0_0",   // Discord Token Login (unpacked)
+		"examples/path/Extensions/kfjglmgfjedhhcddpfgfogkahmenikan/1.0_0",     // Discord Token Login (unpacked)
 		"examples/path/Extensions/mcohilncbfahbmgdjkbpemcciiolgcge/3.66.10_0", // OKX Wallet (unpacked)
 	}
 }
@@ -148,7 +148,7 @@ func GetExtensionFlags(extensions []string) []string {
 	if len(extensionPaths) > 0 {
 		// 当有扩展时，启用扩展功能
 		flags = append(flags, "--enable-extensions")
-		
+
 		// 关键发现：--disable-extensions-except 也支持逗号分隔的多个路径！
 		// 设置格式：--disable-extensions-except=/path/to/ext1,/path/to/ext2
 		extensionPathsStr := strings.Join(extensionPaths, ",")
@@ -240,14 +240,14 @@ func resolveConflictingFlags(flags []string) []string {
 		// 如果有扩展相关标志，跳过所有可能冲突的扩展disable标志
 		if hasEnableExtensions || hasLoadExtension {
 			if flag == "--disable-extensions" ||
-			   flag == "--disable-component-extensions-with-background-pages" ||
-			   flag == "--disable-background-timer-throttling" ||
-			   flag == "--disable-backgrounding-occluded-windows" ||
-			   flag == "--disable-extensions-file-access-check" ||
-			   flag == "--disable-extensions-http-throttling" ||
-			   flag == "--disable-component-update" ||
-			   flag == "--disable-extensions-install-verification" ||
-			   strings.Contains(flag, "--disable-features=") { // 移除可能包含扩展限制的features
+				flag == "--disable-component-extensions-with-background-pages" ||
+				flag == "--disable-background-timer-throttling" ||
+				flag == "--disable-backgrounding-occluded-windows" ||
+				flag == "--disable-extensions-file-access-check" ||
+				flag == "--disable-extensions-http-throttling" ||
+				flag == "--disable-component-update" ||
+				flag == "--disable-extensions-install-verification" ||
+				strings.Contains(flag, "--disable-features=") { // 移除可能包含扩展限制的features
 				continue
 			}
 		}

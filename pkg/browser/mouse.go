@@ -32,7 +32,14 @@ func NewGhostCursor() *GhostCursor {
 }
 
 // GenerateTrajectory generates a realistic mouse trajectory from current position to target
+// 生成贝塞尔曲线鼠标轨迹（默认快速模式）
 func (gc *GhostCursor) GenerateTrajectory(targetX, targetY float64) []MouseTrajectory {
+	return gc.GenerateTrajectoryWithSpeed(targetX, targetY, 1.0) // 默认速度倍率
+}
+
+// GenerateTrajectoryWithSpeed generates trajectory with speed multiplier
+// speedMultiplier: 1.0 = 快速, 2.0 = 正常拟人, 3.0 = 慢速
+func (gc *GhostCursor) GenerateTrajectoryWithSpeed(targetX, targetY float64, speedMultiplier float64) []MouseTrajectory {
 	if gc.currentX == 0 && gc.currentY == 0 {
 		// Initialize current position if not set
 		gc.currentX = 100 + gc.random.Float64()*200
@@ -44,10 +51,10 @@ func (gc *GhostCursor) GenerateTrajectory(targetX, targetY float64) []MouseTraje
 	deltaY := targetY - startY
 	distance := math.Sqrt(deltaX*deltaX + deltaY*deltaY)
 
-	// Calculate number of steps based on distance
-	steps := int(math.Max(10, distance/10))
-	if steps > 100 {
-		steps = 100 // Cap at 100 steps
+	// 优化：减少步数 (5-25步，之前是 10-100步)
+	steps := int(math.Max(5, distance/40))
+	if steps > 25 {
+		steps = 25
 	}
 
 	trajectory := make([]MouseTrajectory, steps)
@@ -58,7 +65,9 @@ func (gc *GhostCursor) GenerateTrajectory(targetX, targetY float64) []MouseTraje
 	controlX2 := startX + deltaX*0.75 + (gc.random.Float64()-0.5)*distance*0.1
 	controlY2 := startY + deltaY*0.75 + (gc.random.Float64()-0.5)*distance*0.1
 
-	totalTime := time.Duration(200+distance/5) * time.Millisecond
+	// 优化：减少总时间 (50ms 基础 + 距离/20)，之前是 200ms + 距离/5
+	baseTime := 50.0 * speedMultiplier
+	totalTime := time.Duration(baseTime+distance/20*speedMultiplier) * time.Millisecond
 
 	for i := 0; i < steps; i++ {
 		t := float64(i) / float64(steps-1)
@@ -121,7 +130,7 @@ func (p *CDPPage) RealClick(x, y float64) error {
 					if delay > 0 {
 						time.Sleep(delay)
 					} else {
-						time.Sleep(5 * time.Millisecond) // Minimum delay
+						time.Sleep(2 * time.Millisecond) // 最小延迟 2ms
 					}
 				}
 			}
@@ -137,8 +146,8 @@ func (p *CDPPage) RealClick(x, y float64) error {
 				return err
 			}
 
-			// Realistic click duration (human clicks typically last 50-200ms)
-			clickDuration := time.Duration(50+rand.Intn(150)) * time.Millisecond
+			// 优化：点击持续时间 10-60ms（之前 50-200ms）
+			clickDuration := time.Duration(10+rand.Intn(50)) * time.Millisecond
 			time.Sleep(clickDuration)
 
 			// Mouse up
@@ -166,7 +175,7 @@ func (p *CDPPage) RealHover(x, y float64) error {
 					if delay > 0 {
 						time.Sleep(delay)
 					} else {
-						time.Sleep(5 * time.Millisecond)
+						time.Sleep(2 * time.Millisecond) // 最小延迟 2ms
 					}
 				}
 			}
@@ -205,8 +214,8 @@ func (p *CDPPage) RealSendKeys(text string) error {
 					return err
 				}
 
-				// Add realistic typing delay (humans type at 200-500ms per character)
-				delay := time.Duration(100+rand.Intn(150)) * time.Millisecond
+				// 优化：打字延迟 20-70ms（之前 100-250ms）
+				delay := time.Duration(20+rand.Intn(50)) * time.Millisecond
 				time.Sleep(delay)
 			}
 			return nil

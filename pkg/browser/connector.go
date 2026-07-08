@@ -109,7 +109,7 @@ func (p *CDPPage) initialize() error {
 			var script string
 			var userAgent string
 			var platform string
-			
+
 			// 检查是否指定了用户ID
 			if p.opts != nil && p.opts.FingerprintUserID != "" {
 				// 使用 UserFingerprintManager 获取或生成指纹
@@ -142,7 +142,7 @@ func (p *CDPPage) initialize() error {
 					userAgent = p.opts.UserAgent
 				}
 			}
-			
+
 			// 设置 HTTP 请求头的 UserAgent（关键！）
 			if userAgent != "" {
 				if err := emulation.SetUserAgentOverride(userAgent).
@@ -152,7 +152,7 @@ func (p *CDPPage) initialize() error {
 					fmt.Printf("⚠️ 设置 UserAgent 失败: %v\n", err)
 				}
 			}
-			
+
 			_, err := page.AddScriptToEvaluateOnNewDocument(script).Do(ctx)
 			return err
 		}),
@@ -175,10 +175,10 @@ func (p *CDPPage) initialize() error {
 type WaitUntil string
 
 const (
-	WaitLoad            WaitUntil = "load"            // 等待 load 事件（默认）
+	WaitLoad             WaitUntil = "load"             // 等待 load 事件（默认）
 	WaitDOMContentLoaded WaitUntil = "domcontentloaded" // 等待 DOMContentLoaded
-	WaitNetworkIdle0    WaitUntil = "networkidle0"    // 500ms 内无网络请求
-	WaitNetworkIdle2    WaitUntil = "networkidle2"    // 500ms 内 ≤2 个网络请求
+	WaitNetworkIdle0     WaitUntil = "networkidle0"     // 500ms 内无网络请求
+	WaitNetworkIdle2     WaitUntil = "networkidle2"     // 500ms 内 ≤2 个网络请求
 )
 
 // NavigateOptions 导航选项
@@ -371,32 +371,32 @@ func (p *CDPPage) RealClickSelector(selector string) error {
 	}
 
 	// 获取元素坐标
-	var x, y float64
-	err := chromedp.Run(p.ctx, chromedp.Evaluate(fmt.Sprintf(`
-		(function() {
-			const elem = document.querySelector('%s');
-			if (!elem) return null;
-			
-			elem.scrollIntoViewIfNeeded ? elem.scrollIntoViewIfNeeded() : elem.scrollIntoView({block: 'center'});
-			
-			const rect = elem.getBoundingClientRect();
-			// 添加随机偏移更像人类
-			const rx = (Math.random() - 0.5) * Math.min(rect.width * 0.3, 8);
-			const ry = (Math.random() - 0.5) * Math.min(rect.height * 0.3, 8);
-			
-			return {
-				x: rect.left + rect.width / 2 + rx,
-				y: rect.top + rect.height / 2 + ry
-			};
-		})()
-	`, selector), &map[string]float64{"x": 0, "y": 0}))
-	if err != nil {
-		return fmt.Errorf("failed to get element coords: %w", err)
-	}
+	// var x, y float64
+	// err := chromedp.Run(p.ctx, chromedp.Evaluate(fmt.Sprintf(`
+	// 	(function() {
+	// 		const elem = document.querySelector('%s');
+	// 		if (!elem) return null;
+
+	// 		elem.scrollIntoViewIfNeeded ? elem.scrollIntoViewIfNeeded() : elem.scrollIntoView({block: 'center'});
+
+	// 		const rect = elem.getBoundingClientRect();
+	// 		// 添加随机偏移更像人类
+	// 		const rx = (Math.random() - 0.5) * Math.min(rect.width * 0.3, 8);
+	// 		const ry = (Math.random() - 0.5) * Math.min(rect.height * 0.3, 8);
+
+	// 		return {
+	// 			x: rect.left + rect.width / 2 + rx,
+	// 			y: rect.top + rect.height / 2 + ry
+	// 		};
+	// 	})()
+	// `, selector), &map[string]float64{"x": 0, "y": 0}))
+	// if err != nil {
+	// 	return fmt.Errorf("failed to get element coords: %w", err)
+	// }
 
 	// 从 Evaluate 结果中提取坐标
 	var coordResult map[string]interface{}
-	err = chromedp.Run(p.ctx, chromedp.Evaluate(fmt.Sprintf(`
+	err := chromedp.Run(p.ctx, chromedp.Evaluate(fmt.Sprintf(`
 		(function() {
 			const elem = document.querySelector('%s');
 			if (!elem) return null;
@@ -417,8 +417,8 @@ func (p *CDPPage) RealClickSelector(selector string) error {
 		return fmt.Errorf("element not found: %s", selector)
 	}
 
-	x, _ = coordResult["x"].(float64)
-	y, _ = coordResult["y"].(float64)
+	x, _ := coordResult["x"].(float64)
+	y, _ := coordResult["y"].(float64)
 
 	// 使用拟人化点击
 	return p.RealClick(x, y)
@@ -902,7 +902,7 @@ func (p *CDPPage) WaitVisible(selector string, timeout time.Duration) error {
 				return nil
 			}
 		}
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
 	}
 	return fmt.Errorf("timeout waiting for element visible: %s", selector)
 }
@@ -931,7 +931,7 @@ func (p *CDPPage) WaitNotVisible(selector string, timeout time.Duration) error {
 				return nil
 			}
 		}
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
 	}
 	return fmt.Errorf("timeout waiting for element to disappear: %s", selector)
 }

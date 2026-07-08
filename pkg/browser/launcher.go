@@ -212,9 +212,9 @@ func (cl *ChromeLauncher) buildChromeFlags(opts *ConnectOptions, port int) ([]st
 			flags = append(flags, proxyFlags...)
 		}
 
-		// Add cache flags if enabled (default: enabled with 500MB)
-		// 默认启用缓存，500MB（共享缓存，静态资源无风控风险）
-		if !opts.EnableCache || opts.CacheSizeMB > 0 {
+		// Add cache flags if enabled
+		// 缓存默认关闭，通过 EnableCache=true 或 CacheSizeMB>0 启用
+		if opts.EnableCache || opts.CacheSizeMB > 0 {
 			cacheSizeMB := opts.CacheSizeMB
 			if cacheSizeMB <= 0 {
 				cacheSizeMB = 500 // 默认 500MB

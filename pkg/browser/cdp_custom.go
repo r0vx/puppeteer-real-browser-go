@@ -262,7 +262,7 @@ func (c *CustomCDPClient) EvaluateWithoutRuntimeEnable(expression string) (inter
 	}
 
 	// Wait for page to load
-	time.Sleep(2 * time.Second)
+	time.Sleep(500 * time.Millisecond)
 
 	// Get result using DOM query
 	getResultScript := `document.querySelector('body').getAttribute('data-result') || window.__customEvalResult`
@@ -357,15 +357,21 @@ func (c *CustomCDPClient) TakeScreenshot() ([]byte, error) {
 	return []byte(response.Data), nil
 }
 
-// Click performs a click without Runtime.Enable
-func (c *CustomCDPClient) Click(x, y float64) error {
-	// 1. 先移动鼠标到目标位置
-	moveParams := map[string]interface{}{
+// MoveMouse moves mouse to a position
+func (c *CustomCDPClient) MoveMouse(x, y float64) error {
+	params := map[string]interface{}{
 		"type": "mouseMoved",
 		"x":    x,
 		"y":    y,
 	}
-	if _, err := c.sendCommand("Input.dispatchMouseEvent", moveParams); err != nil {
+	_, err := c.sendCommand("Input.dispatchMouseEvent", params)
+	return err
+}
+
+// Click performs a click without Runtime.Enable
+func (c *CustomCDPClient) Click(x, y float64) error {
+	// 1. 先移动鼠标到目标位置
+	if err := c.MoveMouse(x, y); err != nil {
 		return err
 	}
 
@@ -382,7 +388,7 @@ func (c *CustomCDPClient) Click(x, y float64) error {
 	}
 
 	// 3. 短暂延迟模拟真实点击
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(10 * time.Millisecond)
 
 	// 4. 鼠标释放
 	releaseParams := map[string]interface{}{
@@ -393,6 +399,19 @@ func (c *CustomCDPClient) Click(x, y float64) error {
 		"clickCount": 1,
 	}
 	_, err := c.sendCommand("Input.dispatchMouseEvent", releaseParams)
+	return err
+}
+
+// Scroll performs mouse wheel scroll
+func (c *CustomCDPClient) Scroll(x, y, deltaX, deltaY float64) error {
+	params := map[string]interface{}{
+		"type":   "mouseWheel",
+		"x":      x,
+		"y":      y,
+		"deltaX": deltaX,
+		"deltaY": deltaY,
+	}
+	_, err := c.sendCommand("Input.dispatchMouseEvent", params)
 	return err
 }
 
@@ -419,7 +438,7 @@ func (c *CustomCDPClient) Type(text string) error {
 		}
 
 		// 模拟人类输入速度
-		time.Sleep(time.Duration(50+rand.Intn(100)) * time.Millisecond)
+		time.Sleep(time.Duration(10+rand.Intn(50)) * time.Millisecond)
 	}
 	return nil
 }
@@ -567,7 +586,7 @@ func (p *CustomCDPPage) initialize() error {
 	var script string
 	var userAgent string
 	var platform string
-	
+
 	// 检查是否指定了用户ID
 	if p.opts != nil && p.opts.FingerprintUserID != "" {
 		// 使用 UserFingerprintManager 获取或生成指纹
@@ -640,11 +659,88 @@ func (p *CustomCDPPage) Click(x, y float64) error {
 	return p.client.Click(x, y)
 }
 
-// RealClick performs a realistic click (using same logic as mouse.go)
+// RealClick performs a realistic click with Bezier curve mouse movement
+// 使用贝塞尔曲线进行拟人化鼠标移动后点击
 func (p *CustomCDPPage) RealClick(x, y float64) error {
-	// For custom CDP, we use basic click for now
-	// In a full implementation, we'd integrate with the GhostCursor logic
-	return p.client.Click(x, y)
+	cursor := NewGhostCursor()
+	trajectory := cursor.GenerateTrajectory(x, y)
+
+	// 沿贝塞尔曲线轨迹移动鼠标
+	for i, point := range trajectory {
+		if err := p.client.MoveMouse(point.X, point.Y); err != nil {
+			return err
+		}
+
+		// 添加真实的时间延迟
+		if i < len(trajectory)-1 {
+			delay := trajectory[i+1].Time - point.Time
+			if delay > 0 {
+				time.Sleep(delay)
+			} else {
+				time.Sleep(2 * time.Millisecond) // 最小延迟 2ms
+			}
+		}
+	}
+
+	// 执行点击（带真实按压时长）
+	// 1. 鼠标按下
+	pressParams := map[string]interface{}{
+		"type":       "mousePressed",
+		"x":          x,
+		"y":          y,
+		"button":     "left",
+		"clickCount": 1,
+	}
+	if _, err := p.client.sendCommand("Input.dispatchMouseEvent", pressParams); err != nil {
+		return err
+	}
+
+	// 2. 真实点击持续时间 (50-200ms)
+	clickDuration := time.Duration(10+rand.Intn(50)) * time.Millisecond
+	time.Sleep(clickDuration)
+
+	// 3. 鼠标释放
+	releaseParams := map[string]interface{}{
+		"type":       "mouseReleased",
+		"x":          x,
+		"y":          y,
+		"button":     "left",
+		"clickCount": 1,
+	}
+	_, err := p.client.sendCommand("Input.dispatchMouseEvent", releaseParams)
+	return err
+}
+
+// RealHover performs realistic hover with Bezier curve mouse movement
+// 使用贝塞尔曲线进行拟人化鼠标悬停
+func (p *CustomCDPPage) RealHover(x, y float64) error {
+	cursor := NewGhostCursor()
+	trajectory := cursor.GenerateTrajectory(x, y)
+
+	for i, point := range trajectory {
+		if err := p.client.MoveMouse(point.X, point.Y); err != nil {
+			return err
+		}
+
+		if i < len(trajectory)-1 {
+			delay := trajectory[i+1].Time - point.Time
+			if delay > 0 {
+				time.Sleep(delay)
+			} else {
+				time.Sleep(2 * time.Millisecond) // 最小延迟 2ms
+			}
+		}
+	}
+	return nil
+}
+
+// RealScroll performs realistic scrolling with human-like variations
+// 带随机抖动的拟人化滚动
+func (p *CustomCDPPage) RealScroll(deltaX, deltaY float64) error {
+	// 添加随机变化使滚动更自然
+	variationX := deltaX + (rand.Float64()-0.5)*deltaX*0.1
+	variationY := deltaY + (rand.Float64()-0.5)*deltaY*0.1
+	return p.client.Scroll(0, 0, variationX, variationY)
 }
 
 // Evaluate executes JavaScript WITHOUT Runtime.Enable
@@ -660,25 +756,28 @@ func escapeJsSelector(selector string) string {
 	return escaped
 }
 
-// WaitForSelector waits for an element
+// WaitForSelector waits for an element (default 30s timeout)
 func (p *CustomCDPPage) WaitForSelector(selector string) error {
+	return p.WaitForSelectorWithTimeout(selector, 30*time.Second)
+}
+
+// WaitForSelectorWithTimeout waits for an element with custom timeout
+func (p *CustomCDPPage) WaitForSelectorWithTimeout(selector string, timeout time.Duration) error {
 	escaped := escapeJsSelector(selector)
-	// Simplified implementation using polling
-	maxAttempts := 30
-	for i := 0; i < maxAttempts; i++ {
+	deadline := time.Now().Add(timeout)
+	interval := 10 * time.Millisecond
+
+	for time.Now().Before(deadline) {
 		result, err := p.Evaluate(fmt.Sprintf("document.querySelector('%s') !== null", escaped))
-		if err != nil {
-			continue
+		if err == nil {
+			if found, ok := result.(bool); ok && found {
+				return nil
+			}
 		}
-
-		if found, ok := result.(bool); ok && found {
-			return nil
-		}
-
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(interval)
 	}
 
-	return fmt.Errorf("element with selector '%s' not found", selector)
+	return fmt.Errorf("timeout waiting for selector '%s' after %v", selector, timeout)
 }
 
 // ClickSelector clicks an element by CSS selector
@@ -775,7 +874,7 @@ func (p *CustomCDPPage) SendKeys(selector, text string) error {
 		if err != nil {
 			return err
 		}
-		time.Sleep(time.Duration(80+rand.Intn(120)) * time.Millisecond)
+		time.Sleep(time.Duration(10+rand.Intn(50)) * time.Millisecond)
 	}
 	return nil
 }
@@ -868,7 +967,7 @@ func (p *CustomCDPPage) WaitVisible(selector string, timeout time.Duration) erro
 		if err == nil && visible {
 			return nil
 		}
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
 	}
 	return fmt.Errorf("timeout waiting for element: %s", selector)
 }
@@ -881,7 +980,7 @@ func (p *CustomCDPPage) WaitNotVisible(selector string, timeout time.Duration) e
 		if !visible {
 			return nil
 		}
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
 	}
 	return fmt.Errorf("timeout waiting for element to disappear: %s", selector)
 }
@@ -1179,4 +1278,90 @@ func (p *CustomCDPPage) GetResponseBody(requestID string) ([]byte, error) {
 		return base64.StdEncoding.DecodeString(resp.Body)
 	}
 	return []byte(resp.Body), nil
+}
+
+// ==================== Fetch 域（请求拦截）====================
+
+// EnableFetch enables fetch domain for request interception
+// patterns: URL patterns to intercept, e.g. ["*diamond_buy*", "*api/pay*"]
+func (p *CustomCDPPage) EnableFetch(patterns []string) error {
+	urlPatterns := make([]map[string]string, len(patterns))
+	for i, pattern := range patterns {
+		urlPatterns[i] = map[string]string{"urlPattern": pattern}
+	}
+	_, err := p.client.sendCommand("Fetch.enable", map[string]interface{}{
+		"patterns": urlPatterns,
+	})
+	return err
+}
+
+// DisableFetch disables fetch domain
+func (p *CustomCDPPage) DisableFetch() error {
+	_, err := p.client.sendCommand("Fetch.disable", nil)
+	return err
+}
+
+// OnRequestPaused subscribes to Fetch.requestPaused events
+// This is called when a request matches the patterns set in EnableFetch
+func (p *CustomCDPPage) OnRequestPaused(handler func(requestID, url, method, postData string, headers map[string]string)) {
+	p.client.OnEvent("Fetch.requestPaused", func(params json.RawMessage) {
+		var data struct {
+			RequestID string `json:"requestId"`
+			Request   struct {
+				URL      string            `json:"url"`
+				Method   string            `json:"method"`
+				PostData string            `json:"postData"`
+				Headers  map[string]string `json:"headers"`
+			} `json:"request"`
+		}
+		if json.Unmarshal(params, &data) == nil {
+			handler(data.RequestID, data.Request.URL, data.Request.Method, data.Request.PostData, data.Request.Headers)
+		}
+	})
+}
+
+// ContinueRequest continues an intercepted request, optionally with a modified URL
+func (p *CustomCDPPage) ContinueRequest(requestID string, url string) error {
+	params := map[string]interface{}{"requestId": requestID}
+	if url != "" {
+		params["url"] = url
+	}
+	_, err := p.client.sendCommand("Fetch.continueRequest", params)
+	return err
+}
+
+// ContinueRequestWithBody continues an intercepted request with modified URL and/or POST data
+func (p *CustomCDPPage) ContinueRequestWithBody(requestID, url, postData string, headers map[string]string) error {
+	params := map[string]interface{}{"requestId": requestID}
+	if url != "" {
+		params["url"] = url
+	}
+	if postData != "" {
+		// postData must be base64 encoded
+		params["postData"] = base64.StdEncoding.EncodeToString([]byte(postData))
+	}
+	if len(headers) > 0 {
+		headerEntries := make([]map[string]string, 0, len(headers))
+		for name, value := range headers {
+			headerEntries = append(headerEntries, map[string]string{
+				"name":  name,
+				"value": value,
+			})
+		}
+		params["headers"] = headerEntries
+	}
+	_, err := p.client.sendCommand("Fetch.continueRequest", params)
+	return err
+}
+
+// FailRequest aborts an intercepted request
+func (p *CustomCDPPage) FailRequest(requestID string, reason string) error {
+	if reason == "" {
+		reason = "Aborted"
+	}
+	_, err := p.client.sendCommand("Fetch.failRequest", map[string]interface{}{
+		"requestId":   requestID,
+		"errorReason": reason,
+	})
+	return err
 }

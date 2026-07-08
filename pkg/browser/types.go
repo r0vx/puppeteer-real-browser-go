@@ -84,9 +84,9 @@ type ConnectOptions struct {
 
 	// Cache settings - optimize page load performance
 	// 缓存设置 - 优化页面加载性能
-	EnableCache  bool   `json:"enableCache"`  // 启用磁盘缓存（默认 true）
-	CacheDir     string `json:"cacheDir"`     // 缓存目录（留空使用 user-data-dir 下的默认位置）
-	CacheSizeMB  int    `json:"cacheSizeMB"`  // 缓存大小 MB（默认 500MB）
+	EnableCache bool   `json:"enableCache"` // 启用磁盘缓存（默认 false）
+	CacheDir    string `json:"cacheDir"`    // 缓存目录（留空使用 user-data-dir 下的默认位置）
+	CacheSizeMB int    `json:"cacheSizeMB"` // 缓存大小 MB（默认 500MB，设置此值会自动启用缓存）
 }
 
 // ProxyConfig contains proxy server configuration
