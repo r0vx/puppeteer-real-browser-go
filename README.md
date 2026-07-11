@@ -4,7 +4,7 @@ A Go implementation of puppeteer-real-browser that prevents detection as a bot i
 
 [![Go Version](https://img.shields.io/badge/Go-1.23+-blue.svg)](https://golang.org)
 [![License](https://img.shields.io/badge/license-ISC-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-passing-brightgreen.svg)](https://github.com/HNRow/puppeteer-real-browser-go/actions)
+[![Tests](https://img.shields.io/badge/tests-passing-brightgreen.svg)](https://github.com/r0vx/puppeteer-real-browser-go/actions)
 
 ## 🚀 Features
 
@@ -34,7 +34,7 @@ A Go implementation of puppeteer-real-browser that prevents detection as a bot i
 ## 📦 Installation
 
 ```bash
-go get github.com/HNRow/puppeteer-real-browser-go
+go get github.com/r0vx/puppeteer-real-browser-go
 ```
 
 ### Prerequisites
@@ -62,7 +62,7 @@ import (
     "context"
     "log"
     
-    "github.com/HNRow/puppeteer-real-browser-go/pkg/browser"
+    "github.com/r0vx/puppeteer-real-browser-go/pkg/browser"
 )
 
 func main() {
@@ -253,7 +253,7 @@ The library automatically injects 24+ stealth techniques:
 ### Realistic Mouse Movement
 
 ```go
-import "github.com/HNRow/puppeteer-real-browser-go/pkg/page"
+import "github.com/r0vx/puppeteer-real-browser-go/pkg/page"
 
 // Create page controller with realistic interactions
 controller := page.NewController(browserPage, ctx, true)
@@ -267,7 +267,7 @@ err := controller.RealClick(100, 200)
 ### Turnstile Captcha Solving
 
 ```go
-import "github.com/HNRow/puppeteer-real-browser-go/pkg/turnstile"
+import "github.com/r0vx/puppeteer-real-browser-go/pkg/turnstile"
 
 // Create and start Turnstile solver
 solver := turnstile.NewSolver(page, ctx)
@@ -467,7 +467,7 @@ sudo apt-get install xvfb
 ### Development Setup
 ```bash
 # Clone repository
-git clone https://github.com/HNRow/puppeteer-real-browser-go.git
+git clone https://github.com/r0vx/puppeteer-real-browser-go.git
 cd puppeteer-real-browser-go
 
 # Install dependencies
