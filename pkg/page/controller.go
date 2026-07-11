@@ -25,17 +25,10 @@ func NewController(page browser.Page, ctx context.Context, enabled bool) *Contro
 	}
 }
 
-// Initialize sets up the controller
-func (pc *Controller) Initialize() error {
-	if !pc.enabled {
-		return nil
-	}
-
-	// Wait a bit for the page to be ready
-	//time.Sleep(1 * time.Second)
-
-	// Inject realistic mouse movement scripts
-	script := `
+// realisticMouseJS defines window.__realisticMouse. Injected on Initialize and
+// re-injected on demand by RealClick, because a navigation wipes window globals
+// and there is no cross-navigation injection hook on the Page interface.
+const realisticMouseJS = `
 		// Realistic mouse movement simulation
 		window.__realisticMouse = {
 			// Generate human-like mouse trajectory
@@ -97,11 +90,15 @@ func (pc *Controller) Initialize() error {
 				document.dispatchEvent(clickEvent);
 			}
 		};
-		
-		console.log('🎯 Realistic mouse movement enabled');
 	`
 
-	_, err := pc.page.Evaluate(script)
+// Initialize sets up the controller
+func (pc *Controller) Initialize() error {
+	if !pc.enabled {
+		return nil
+	}
+
+	_, err := pc.page.Evaluate(realisticMouseJS + "\nconsole.log('🎯 Realistic mouse movement enabled');")
 	return err
 }
 
@@ -111,19 +108,21 @@ func (pc *Controller) Stop() error {
 	return nil
 }
 
-// RealClick performs a realistic click with human-like mouse movement
+// RealClick performs a realistic click with human-like mouse movement.
+// It re-injects __realisticMouse if a navigation wiped it, and propagates the
+// evaluation error instead of silently swallowing a failed click.
 func (pc *Controller) RealClick(x, y float64) error {
 	if !pc.enabled {
 		return pc.page.Click(x, y)
 	}
 
-	// Use the injected realistic mouse movement
 	script := fmt.Sprintf(`
+		if (!window.__realisticMouse) { %s }
 		window.__realisticMouse.realClick(%f, %f);
-	`, x, y)
+	`, realisticMouseJS, x, y)
 
-	pc.page.Evaluate(script)
-	return nil
+	_, err := pc.page.Evaluate(script)
+	return err
 }
 
 // HumanClick performs a click with random human-like delays
@@ -205,7 +204,7 @@ func (pc *Controller) WaitForElement(selector string, timeout time.Duration) err
 			return nil
 		}
 
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond)
 	}
 
 	return fmt.Errorf("element %s not found within timeout", selector)

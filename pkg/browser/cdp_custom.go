@@ -552,6 +552,7 @@ func (ccc *CustomCDPConnector) Connect(ctx context.Context, chrome *ChromeProces
 		chrome: chrome,
 		opts:   opts,
 		ctx:    ctx,
+		cursor: NewGhostCursor(),
 	}
 
 	// Initialize the page with stealth settings
@@ -569,6 +570,21 @@ type CustomCDPPage struct {
 	chrome *ChromeProcess
 	opts   *ConnectOptions
 	ctx    context.Context
+	cursor *GhostCursor // 持久化拟人光标，避免每次点击瞬移
+
+	// 请求拦截状态
+	fetchMu         sync.Mutex
+	fetchSubscribed bool                                                                     // Fetch.requestPaused 是否已订阅（防止重复订阅导致双重 continue）
+	pausedHandler   func(requestID, url, method, postData string, headers map[string]string) // 直接 API 处理器
+	requestHandler  RequestHandler                                                           // Page 接口处理器
+}
+
+// getCursor returns the page's persistent cursor, lazily creating it.
+func (p *CustomCDPPage) getCursor() *GhostCursor {
+	if p.cursor == nil {
+		p.cursor = NewGhostCursor()
+	}
+	return p.cursor
 }
 
 // initialize sets up the custom CDP page with stealth features
@@ -662,8 +678,7 @@ func (p *CustomCDPPage) Click(x, y float64) error {
 // RealClick performs a realistic click with Bezier curve mouse movement
 // 使用贝塞尔曲线进行拟人化鼠标移动后点击
 func (p *CustomCDPPage) RealClick(x, y float64) error {
-	cursor := NewGhostCursor()
-	trajectory := cursor.GenerateTrajectory(x, y)
+	trajectory := p.getCursor().GenerateTrajectory(x, y)
 
 	// 沿贝塞尔曲线轨迹移动鼠标
 	for i, point := range trajectory {
@@ -695,7 +710,7 @@ func (p *CustomCDPPage) RealClick(x, y float64) error {
 		return err
 	}
 
-	// 2. 真实点击持续时间 (50-200ms)
+	// 2. 真实点击持续时间 (10-60ms)
 	clickDuration := time.Duration(10+rand.Intn(50)) * time.Millisecond
 	time.Sleep(clickDuration)
 
@@ -714,8 +729,7 @@ func (p *CustomCDPPage) RealClick(x, y float64) error {
 // RealHover performs realistic hover with Bezier curve mouse movement
 // 使用贝塞尔曲线进行拟人化鼠标悬停
 func (p *CustomCDPPage) RealHover(x, y float64) error {
-	cursor := NewGhostCursor()
-	trajectory := cursor.GenerateTrajectory(x, y)
+	trajectory := p.getCursor().GenerateTrajectory(x, y)
 
 	for i, point := range trajectory {
 		if err := p.client.MoveMouse(point.X, point.Y); err != nil {
@@ -734,13 +748,20 @@ func (p *CustomCDPPage) RealHover(x, y float64) error {
 	return nil
 }
 
-// RealScroll performs realistic scrolling with human-like variations
-// 带随机抖动的拟人化滚动
+// RealScroll performs realistic scrolling with human-like variations.
+// 真实滚轮会分多次小步触发，单次整块 delta 是机器人特征，
+// 因此拆成 ~100px 的多个抖动小步并加步间延迟。
 func (p *CustomCDPPage) RealScroll(deltaX, deltaY float64) error {
-	// 添加随机变化使滚动更自然
-	variationX := deltaX + (rand.Float64()-0.5)*deltaX*0.1
-	variationY := deltaY + (rand.Float64()-0.5)*deltaY*0.1
-	return p.client.Scroll(0, 0, variationX, variationY)
+	steps := wheelSteps(deltaX, deltaY)
+	for i, s := range steps {
+		if err := p.client.Scroll(0, 0, s[0], s[1]); err != nil {
+			return err
+		}
+		if i < len(steps)-1 {
+			time.Sleep(time.Duration(15+rand.Intn(25)) * time.Millisecond)
+		}
+	}
+	return nil
 }
 
 // Evaluate executes JavaScript WITHOUT Runtime.Enable
@@ -765,7 +786,7 @@ func (p *CustomCDPPage) WaitForSelector(selector string) error {
 func (p *CustomCDPPage) WaitForSelectorWithTimeout(selector string, timeout time.Duration) error {
 	escaped := escapeJsSelector(selector)
 	deadline := time.Now().Add(timeout)
-	interval := 10 * time.Millisecond
+	interval := 100 * time.Millisecond
 
 	for time.Now().Before(deadline) {
 		result, err := p.Evaluate(fmt.Sprintf("document.querySelector('%s') !== null", escaped))
@@ -927,18 +948,119 @@ func (p *CustomCDPPage) Close() error {
 	return p.client.Close()
 }
 
-// SetRequestInterception enables or disables request interception (stub for CustomCDPPage)
+// SetRequestInterception enables or disables request interception (Page interface).
+// Backed by the Fetch domain with a catch-all pattern. Pair with OnRequest to
+// handle requests; without a handler, matched requests are auto-continued so
+// navigation never hangs.
 func (p *CustomCDPPage) SetRequestInterception(enabled bool) error {
-	// TODO: Implement request interception for CustomCDPPage if needed
-	// For now, return nil to satisfy the interface
+	if !enabled {
+		return p.DisableFetch()
+	}
+	if err := p.EnableFetch([]string{"*"}); err != nil {
+		return err
+	}
+	p.ensureFetchSubscription()
 	return nil
 }
 
-// OnRequest sets the request handler for intercepted requests (stub for CustomCDPPage)
+// OnRequest sets the request handler for intercepted requests (Page interface).
+// Inside the handler, call req.Continue()/Respond()/Abort(); returning an error
+// auto-continues the request.
 func (p *CustomCDPPage) OnRequest(handler RequestHandler) error {
-	// TODO: Implement request handler for CustomCDPPage if needed
-	// For now, return nil to satisfy the interface
+	p.fetchMu.Lock()
+	p.requestHandler = handler
+	p.fetchMu.Unlock()
+	p.ensureFetchSubscription()
 	return nil
+}
+
+// ensureFetchSubscription registers the single Fetch.requestPaused dispatcher.
+// Registering exactly once (guarded by fetchSubscribed) prevents duplicate
+// handlers from continuing the same request twice.
+func (p *CustomCDPPage) ensureFetchSubscription() {
+	p.fetchMu.Lock()
+	if p.fetchSubscribed {
+		p.fetchMu.Unlock()
+		return
+	}
+	p.fetchSubscribed = true
+	p.fetchMu.Unlock()
+
+	p.client.OnEvent("Fetch.requestPaused", func(params json.RawMessage) {
+		var data struct {
+			RequestID string `json:"requestId"`
+			Request   struct {
+				URL      string            `json:"url"`
+				Method   string            `json:"method"`
+				PostData string            `json:"postData"`
+				Headers  map[string]string `json:"headers"`
+			} `json:"request"`
+		}
+		if json.Unmarshal(params, &data) != nil {
+			return
+		}
+		r := data.Request
+
+		p.fetchMu.Lock()
+		paused := p.pausedHandler
+		reqHandler := p.requestHandler
+		p.fetchMu.Unlock()
+
+		// 直接 API 优先：调用方自行决定 continue/fulfill/fail
+		if paused != nil {
+			paused(data.RequestID, r.URL, r.Method, r.PostData, r.Headers)
+			return
+		}
+		// Page 接口处理器
+		if reqHandler != nil {
+			req := &InterceptedRequest{
+				URL:       r.URL,
+				Method:    r.Method,
+				Headers:   r.Headers,
+				RequestID: data.RequestID,
+			}
+			req.setPageContext(p)
+			if err := reqHandler(req); err != nil {
+				p.ContinueRequest(data.RequestID, "")
+			}
+			return
+		}
+		// 无处理器：直接放行，避免请求挂起
+		p.ContinueRequest(data.RequestID, "")
+	})
+}
+
+// fulfillRequest fulfills an intercepted request with a custom response (Fetch.fulfillRequest).
+func (p *CustomCDPPage) fulfillRequest(requestID string, response *RequestResponse) error {
+	status := response.Status
+	if status == 0 {
+		status = 200
+	}
+	headerEntries := make([]map[string]string, 0, len(response.Headers)+1)
+	hasContentType := false
+	for name, value := range response.Headers {
+		if strings.ToLower(name) == "content-type" {
+			hasContentType = true
+		}
+		headerEntries = append(headerEntries, map[string]string{"name": name, "value": value})
+	}
+	if !hasContentType {
+		ct := response.ContentType
+		if ct == "" {
+			ct = "text/html; charset=utf-8"
+		}
+		headerEntries = append(headerEntries, map[string]string{"name": "content-type", "value": ct})
+	}
+	params := map[string]interface{}{
+		"requestId":       requestID,
+		"responseCode":    status,
+		"responseHeaders": headerEntries,
+	}
+	if response.Body != "" {
+		params["body"] = base64.StdEncoding.EncodeToString([]byte(response.Body))
+	}
+	_, err := p.client.sendCommand("Fetch.fulfillRequest", params)
+	return err
 }
 
 // ==================== 新增方法 (按原版优化) ====================
@@ -967,7 +1089,7 @@ func (p *CustomCDPPage) WaitVisible(selector string, timeout time.Duration) erro
 		if err == nil && visible {
 			return nil
 		}
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond)
 	}
 	return fmt.Errorf("timeout waiting for element: %s", selector)
 }
@@ -980,7 +1102,7 @@ func (p *CustomCDPPage) WaitNotVisible(selector string, timeout time.Duration) e
 		if !visible {
 			return nil
 		}
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond)
 	}
 	return fmt.Errorf("timeout waiting for element to disappear: %s", selector)
 }
@@ -1301,23 +1423,15 @@ func (p *CustomCDPPage) DisableFetch() error {
 	return err
 }
 
-// OnRequestPaused subscribes to Fetch.requestPaused events
-// This is called when a request matches the patterns set in EnableFetch
+// OnRequestPaused subscribes to Fetch.requestPaused events.
+// This is called when a request matches the patterns set in EnableFetch.
+// The handler is responsible for continuing/fulfilling/failing the request.
+// Calling this more than once replaces the handler (no duplicate dispatch).
 func (p *CustomCDPPage) OnRequestPaused(handler func(requestID, url, method, postData string, headers map[string]string)) {
-	p.client.OnEvent("Fetch.requestPaused", func(params json.RawMessage) {
-		var data struct {
-			RequestID string `json:"requestId"`
-			Request   struct {
-				URL      string            `json:"url"`
-				Method   string            `json:"method"`
-				PostData string            `json:"postData"`
-				Headers  map[string]string `json:"headers"`
-			} `json:"request"`
-		}
-		if json.Unmarshal(params, &data) == nil {
-			handler(data.RequestID, data.Request.URL, data.Request.Method, data.Request.PostData, data.Request.Headers)
-		}
-	})
+	p.fetchMu.Lock()
+	p.pausedHandler = handler
+	p.fetchMu.Unlock()
+	p.ensureFetchSubscription()
 }
 
 // ContinueRequest continues an intercepted request, optionally with a modified URL
@@ -1330,7 +1444,13 @@ func (p *CustomCDPPage) ContinueRequest(requestID string, url string) error {
 	return err
 }
 
-// ContinueRequestWithBody continues an intercepted request with modified URL and/or POST data
+// ContinueRequestWithBody continues an intercepted request with a modified URL
+// and/or POST data.
+//
+// headers, when non-nil, REPLACES the entire request header set (Fetch.continueRequest
+// semantics) — to keep the original Cookie/Authorization/Content-Type headers, pass nil
+// and let Chrome forward them. When postData is overridden, Chrome recomputes
+// Content-Length automatically, so do NOT set it manually.
 func (p *CustomCDPPage) ContinueRequestWithBody(requestID, url, postData string, headers map[string]string) error {
 	params := map[string]interface{}{"requestId": requestID}
 	if url != "" {

@@ -201,22 +201,31 @@ func (req *InterceptedRequest) setPageContext(page Page) {
 
 // InterceptedRequest methods for responding to requests
 func (req *InterceptedRequest) Continue() error {
-	if cdpPage, ok := req.page.(*CDPPage); ok {
-		return cdpPage.continueRequest(req.RequestID)
+	switch pg := req.page.(type) {
+	case *CDPPage:
+		return pg.continueRequest(req.RequestID)
+	case *CustomCDPPage:
+		return pg.ContinueRequest(req.RequestID, "")
 	}
 	return fmt.Errorf("unsupported page type for Continue")
 }
 
 func (req *InterceptedRequest) Respond(response *RequestResponse) error {
-	if cdpPage, ok := req.page.(*CDPPage); ok {
-		return cdpPage.respondToRequest(req.RequestID, response)
+	switch pg := req.page.(type) {
+	case *CDPPage:
+		return pg.respondToRequest(req.RequestID, response)
+	case *CustomCDPPage:
+		return pg.fulfillRequest(req.RequestID, response)
 	}
 	return fmt.Errorf("unsupported page type for Respond")
 }
 
 func (req *InterceptedRequest) Abort() error {
-	if cdpPage, ok := req.page.(*CDPPage); ok {
-		return cdpPage.abortRequest(req.RequestID)
+	switch pg := req.page.(type) {
+	case *CDPPage:
+		return pg.abortRequest(req.RequestID)
+	case *CustomCDPPage:
+		return pg.FailRequest(req.RequestID, "Aborted")
 	}
 	return fmt.Errorf("unsupported page type for Abort")
 }

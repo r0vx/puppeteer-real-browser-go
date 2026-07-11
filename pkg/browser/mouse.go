@@ -4,6 +4,7 @@ import (
 	"context"
 	"math"
 	"math/rand"
+	"sync"
 	"time"
 
 	"github.com/chromedp/cdproto/input"
@@ -16,8 +17,11 @@ type MouseTrajectory struct {
 	Time time.Duration
 }
 
-// GhostCursor implements realistic mouse movement similar to ghost-cursor
+// GhostCursor implements realistic mouse movement similar to ghost-cursor.
+// A cursor is persistent per page so consecutive moves continue from the last
+// position instead of teleporting from a fresh random origin.
 type GhostCursor struct {
+	mu                 sync.Mutex
 	currentX, currentY float64
 	random             *rand.Rand
 }
@@ -32,14 +36,18 @@ func NewGhostCursor() *GhostCursor {
 }
 
 // GenerateTrajectory generates a realistic mouse trajectory from current position to target
-// 生成贝塞尔曲线鼠标轨迹（默认快速模式）
+// 生成贝塞尔曲线鼠标轨迹（默认正常拟人速度）
 func (gc *GhostCursor) GenerateTrajectory(targetX, targetY float64) []MouseTrajectory {
-	return gc.GenerateTrajectoryWithSpeed(targetX, targetY, 1.0) // 默认速度倍率
+	return gc.GenerateTrajectoryWithSpeed(targetX, targetY, 2.0) // 2.0 = 正常拟人（1.0 快速时序过于机械，易被指纹识别）
 }
 
-// GenerateTrajectoryWithSpeed generates trajectory with speed multiplier
-// speedMultiplier: 1.0 = 快速, 2.0 = 正常拟人, 3.0 = 慢速
+// GenerateTrajectoryWithSpeed generates trajectory with speed multiplier.
+// speedMultiplier: 1.0 = 快速, 2.0 = 正常拟人, 3.0 = 慢速。
+// 导出的调速接口，供需要自定义节奏的调用方使用。
 func (gc *GhostCursor) GenerateTrajectoryWithSpeed(targetX, targetY float64, speedMultiplier float64) []MouseTrajectory {
+	gc.mu.Lock()
+	defer gc.mu.Unlock()
+
 	if gc.currentX == 0 && gc.currentY == 0 {
 		// Initialize current position if not set
 		gc.currentX = 100 + gc.random.Float64()*200
@@ -110,10 +118,8 @@ func (gc *GhostCursor) easeInOutQuad(t float64) float64 {
 
 // RealClick performs a realistic click with human-like mouse movement
 func (p *CDPPage) RealClick(x, y float64) error {
-	cursor := NewGhostCursor()
-
-	// Generate trajectory to target position
-	trajectory := cursor.GenerateTrajectory(x, y)
+	// Generate trajectory to target position (persistent cursor avoids teleporting)
+	trajectory := p.getCursor().GenerateTrajectory(x, y)
 
 	return chromedp.Run(p.ctx,
 		// Move mouse along trajectory
@@ -160,8 +166,7 @@ func (p *CDPPage) RealClick(x, y float64) error {
 
 // RealHover performs a realistic hover with human-like mouse movement
 func (p *CDPPage) RealHover(x, y float64) error {
-	cursor := NewGhostCursor()
-	trajectory := cursor.GenerateTrajectory(x, y)
+	trajectory := p.getCursor().GenerateTrajectory(x, y)
 
 	return chromedp.Run(p.ctx,
 		chromedp.ActionFunc(func(ctx context.Context) error {
@@ -184,19 +189,55 @@ func (p *CDPPage) RealHover(x, y float64) error {
 	)
 }
 
-// RealScroll performs realistic scrolling with human-like variations
+// RealScroll performs realistic scrolling with human-like variations.
+// Real wheels emit many small ticks; a single atomic delta is a bot signature,
+// so the delta is split into ~100px ticks with jitter and inter-tick delays.
 func (p *CDPPage) RealScroll(deltaX, deltaY float64) error {
-	// Add random variations to make scrolling more human-like
-	variationX := deltaX + (rand.Float64()-0.5)*deltaX*0.1
-	variationY := deltaY + (rand.Float64()-0.5)*deltaY*0.1
-
+	steps := wheelSteps(deltaX, deltaY)
 	return chromedp.Run(p.ctx,
 		chromedp.ActionFunc(func(ctx context.Context) error {
-			return input.DispatchMouseEvent(input.MouseWheel, 0, 0).
-				WithDeltaX(variationX).
-				WithDeltaY(variationY).Do(ctx)
+			for i, s := range steps {
+				if err := input.DispatchMouseEvent(input.MouseWheel, 0, 0).
+					WithDeltaX(s[0]).WithDeltaY(s[1]).Do(ctx); err != nil {
+					return err
+				}
+				if i < len(steps)-1 {
+					time.Sleep(time.Duration(15+rand.Intn(25)) * time.Millisecond)
+				}
+			}
+			return nil
 		}),
 	)
+}
+
+// getCursor returns the page's persistent cursor, lazily creating it.
+func (p *CDPPage) getCursor() *GhostCursor {
+	if p.cursor == nil {
+		p.cursor = NewGhostCursor()
+	}
+	return p.cursor
+}
+
+// wheelSteps splits a scroll delta into human-like wheel ticks (~100px each with
+// ±15% jitter). Rounding drift is folded into the final tick so the total delta
+// is exact. Always returns at least one tick.
+func wheelSteps(deltaX, deltaY float64) [][2]float64 {
+	dist := math.Max(math.Abs(deltaX), math.Abs(deltaY))
+	n := max(int(math.Ceil(dist/100.0)), 1)
+	steps := make([][2]float64, n)
+	var accX, accY float64
+	for i := range n {
+		sx := deltaX / float64(n)
+		sy := deltaY / float64(n)
+		sx += (rand.Float64() - 0.5) * sx * 0.3
+		sy += (rand.Float64() - 0.5) * sy * 0.3
+		steps[i] = [2]float64{sx, sy}
+		accX += sx
+		accY += sy
+	}
+	steps[n-1][0] += deltaX - accX
+	steps[n-1][1] += deltaY - accY
+	return steps
 }
 
 // RealSendKeys performs realistic typing with human-like timing and variations

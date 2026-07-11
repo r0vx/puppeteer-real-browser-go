@@ -47,10 +47,6 @@ func main() {
 		log.Fatal("❌ 需要 UseCustomCDP: true")
 	}
 
-	// 存储拦截的请求信息（用于匹配响应）
-	var interceptedMu sync.Mutex
-	interceptedRequests := make(map[string]string) // requestID -> URL
-
 	// 启用网络监听
 	if err := customPage.EnableNetwork(); err != nil {
 		log.Fatalf("❌ 启用网络监听失败: %v", err)
@@ -79,25 +75,26 @@ func main() {
 			fmt.Printf("原始 PostData: %s\n", postData)
 		}
 
-		// 记录这个请求，用于匹配响应
-		interceptedMu.Lock()
-		interceptedRequests[requestID] = url
-		interceptedMu.Unlock()
-
 		// 检查是否是 POST 请求且包含 userId
 		if method == "POST" && strings.Contains(postData, "userId") {
-			// 解析 JSON
+			// 解析 JSON（UseNumber 保留原始数字精度，避免大整数被 float64 破坏）
+			dec := json.NewDecoder(strings.NewReader(postData))
+			dec.UseNumber()
 			var body map[string]interface{}
-			if err := json.Unmarshal([]byte(postData), &body); err != nil {
+			if err := dec.Decode(&body); err != nil {
 				fmt.Printf("⚠️ 解析 JSON 失败: %v\n", err)
 				customPage.ContinueRequest(requestID, "")
 				return
 			}
 
-			// 修改 userId
+			// 修改 userId（保留原始类型：字符串仍为字符串，数字仍为数字）
 			oldUserID := body["userId"]
-			body["userId"] = 7777777
-			fmt.Printf("✏️  修改 userId: %v → %v\n", oldUserID, 7777777)
+			if _, isStr := oldUserID.(string); isStr {
+				body["userId"] = "7777777"
+			} else {
+				body["userId"] = json.Number("7777777")
+			}
+			fmt.Printf("✏️  修改 userId: %v → %v\n", oldUserID, body["userId"])
 
 			// 序列化回 JSON
 			newPostData, err := json.Marshal(body)

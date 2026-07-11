@@ -43,6 +43,7 @@ func (cc *CDPConnector) Connect(ctx context.Context, chrome *ChromeProcess, opts
 		allocCancel: cancel,
 		chrome:      chrome,
 		opts:        opts,
+		cursor:      NewGhostCursor(),
 	}
 
 	// Initialize the page with advanced stealth
@@ -68,6 +69,7 @@ type CDPPage struct {
 	targetHandler         *TargetHandler
 	requestListenerCancel context.CancelFunc // 用于取消请求监听器
 	requestListenerMu     sync.Mutex         // 保护监听器操作
+	cursor                *GhostCursor       // 持久化拟人光标，避免每次点击瞬移
 }
 
 // GetContext 返回 chromedp 上下文（用于直接调用 chromedp 方法）
@@ -370,36 +372,14 @@ func (p *CDPPage) RealClickSelector(selector string) error {
 		return fmt.Errorf("element not visible: %w", err)
 	}
 
-	// 获取元素坐标
-	// var x, y float64
-	// err := chromedp.Run(p.ctx, chromedp.Evaluate(fmt.Sprintf(`
-	// 	(function() {
-	// 		const elem = document.querySelector('%s');
-	// 		if (!elem) return null;
-
-	// 		elem.scrollIntoViewIfNeeded ? elem.scrollIntoViewIfNeeded() : elem.scrollIntoView({block: 'center'});
-
-	// 		const rect = elem.getBoundingClientRect();
-	// 		// 添加随机偏移更像人类
-	// 		const rx = (Math.random() - 0.5) * Math.min(rect.width * 0.3, 8);
-	// 		const ry = (Math.random() - 0.5) * Math.min(rect.height * 0.3, 8);
-
-	// 		return {
-	// 			x: rect.left + rect.width / 2 + rx,
-	// 			y: rect.top + rect.height / 2 + ry
-	// 		};
-	// 	})()
-	// `, selector), &map[string]float64{"x": 0, "y": 0}))
-	// if err != nil {
-	// 	return fmt.Errorf("failed to get element coords: %w", err)
-	// }
-
-	// 从 Evaluate 结果中提取坐标
+	// 获取元素坐标（先滚动到视口内，否则 getBoundingClientRect 返回的
+	// 视口相对坐标会指向屏幕外，导致折叠线下的元素点空）
 	var coordResult map[string]interface{}
 	err := chromedp.Run(p.ctx, chromedp.Evaluate(fmt.Sprintf(`
 		(function() {
 			const elem = document.querySelector('%s');
 			if (!elem) return null;
+			elem.scrollIntoViewIfNeeded ? elem.scrollIntoViewIfNeeded() : elem.scrollIntoView({block: 'center'});
 			const rect = elem.getBoundingClientRect();
 			const rx = (Math.random() - 0.5) * Math.min(rect.width * 0.3, 8);
 			const ry = (Math.random() - 0.5) * Math.min(rect.height * 0.3, 8);
@@ -771,6 +751,32 @@ func (p *CDPPage) abortRequest(requestID string) error {
 	}))
 }
 
+// ContinueRequestWithBody continues an intercepted request with a modified URL
+// and/or POST data (parity with CustomCDPPage). Requires request interception to
+// be enabled (SetRequestInterception + OnRequest); call this from the handler.
+//
+// headers, when non-nil, REPLACES the entire request header set — pass nil to keep
+// the original headers. Chrome recomputes Content-Length for an overridden body.
+func (p *CDPPage) ContinueRequestWithBody(requestID, url, postData string, headers map[string]string) error {
+	return chromedp.Run(p.ctx, chromedp.ActionFunc(func(ctx context.Context) error {
+		cmd := fetch.ContinueRequest(fetch.RequestID(requestID))
+		if url != "" {
+			cmd = cmd.WithURL(url)
+		}
+		if postData != "" {
+			cmd = cmd.WithPostData(base64.StdEncoding.EncodeToString([]byte(postData)))
+		}
+		if len(headers) > 0 {
+			entries := make([]*fetch.HeaderEntry, 0, len(headers))
+			for name, value := range headers {
+				entries = append(entries, &fetch.HeaderEntry{Name: name, Value: value})
+			}
+			cmd = cmd.WithHeaders(entries)
+		}
+		return cmd.Do(ctx)
+	}))
+}
+
 // ==================== Cookie/Storage 管理 ====================
 
 // SetCookies sets cookies for the page
@@ -902,7 +908,7 @@ func (p *CDPPage) WaitVisible(selector string, timeout time.Duration) error {
 				return nil
 			}
 		}
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond)
 	}
 	return fmt.Errorf("timeout waiting for element visible: %s", selector)
 }
@@ -931,7 +937,7 @@ func (p *CDPPage) WaitNotVisible(selector string, timeout time.Duration) error {
 				return nil
 			}
 		}
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond)
 	}
 	return fmt.Errorf("timeout waiting for element to disappear: %s", selector)
 }
