@@ -195,6 +195,21 @@ func (p *CDPPage) Navigate(url string) error {
 	return chromedp.Run(p.ctx, chromedp.Navigate(url))
 }
 
+// lifecycleEventName 把等待策略映射为 Page.lifecycleEvent 名称。与 puppeteer 同源：
+// networkAlmostIdle = 500ms 内不超过 2 个连接，networkIdle = 500ms 内没有连接
+func lifecycleEventName(w WaitUntil) string {
+	switch w {
+	case WaitDOMContentLoaded:
+		return "DOMContentLoaded"
+	case WaitNetworkIdle0:
+		return "networkIdle"
+	case WaitNetworkIdle2:
+		return "networkAlmostIdle"
+	default:
+		return "load"
+	}
+}
+
 // NavigateWithOptions navigates with custom options (like puppeteer page.goto)
 func (p *CDPPage) NavigateWithOptions(url string, opts *NavigateOptions) error {
 	if opts == nil {
@@ -207,97 +222,55 @@ func (p *CDPPage) NavigateWithOptions(url string, opts *NavigateOptions) error {
 		ctx, cancel = context.WithTimeout(p.ctx, opts.Timeout)
 		defer cancel()
 	}
-
-	// 构建导航 action
-	var actions []chromedp.Action
-
-	// 如果有 Referrer，先设置
-	if opts.Referrer != "" {
-		actions = append(actions, chromedp.ActionFunc(func(ctx context.Context) error {
-			return page.SetDocumentContent("", fmt.Sprintf(`<script>Object.defineProperty(document, 'referrer', {get: () => '%s'})</script>`, opts.Referrer)).Do(ctx)
-		}))
-	}
-
-	// 根据 WaitUntil 策略选择等待方式
-	switch opts.WaitUntil {
-	case WaitDOMContentLoaded:
-		// 只等待 DOM 解析完成
-		actions = append(actions, chromedp.ActionFunc(func(ctx context.Context) error {
-			_, _, _, _, err := page.Navigate(url).Do(ctx)
-			return err
-		}))
-		actions = append(actions, chromedp.WaitReady("body", chromedp.ByQuery))
-
-	case WaitNetworkIdle0, WaitNetworkIdle2:
-		// 等待网络空闲
-		actions = append(actions, chromedp.Navigate(url))
-		actions = append(actions, p.waitNetworkIdle(opts.WaitUntil == WaitNetworkIdle0))
-
-	default: // WaitLoad 或默认
-		actions = append(actions, chromedp.Navigate(url))
-	}
-
-	return chromedp.Run(ctx, actions...)
-}
-
-// NavigateWithReferrer navigates with a referrer header
-func (p *CDPPage) NavigateWithReferrer(url, referrer string) error {
-	return chromedp.Run(p.ctx, chromedp.ActionFunc(func(ctx context.Context) error {
-		_, _, _, _, err := page.Navigate(url).WithReferrer(referrer).Do(ctx)
-		return err
+	return chromedp.Run(ctx, chromedp.ActionFunc(func(ctx context.Context) error {
+		return navigateAndWait(ctx, url, opts.Referrer, lifecycleEventName(opts.WaitUntil))
 	}))
 }
 
-// waitNetworkIdle waits for network to become idle
-func (p *CDPPage) waitNetworkIdle(strict bool) chromedp.Action {
-	return chromedp.ActionFunc(func(ctx context.Context) error {
-		maxPending := 2
-		if strict {
-			maxPending = 0
-		}
+// NavigateWithReferrer navigates with a referrer header and waits for load
+func (p *CDPPage) NavigateWithReferrer(url, referrer string) error {
+	return p.NavigateWithOptions(url, &NavigateOptions{Referrer: referrer})
+}
 
-		pendingRequests := 0
-		idleStart := time.Time{}
-		done := make(chan struct{})
-		timeout := time.After(30 * time.Second)
+// navigateAndWait 导航并等待本次导航（按 loaderId 区分，不会被上一个文档的事件误触发）的指定生命周期事件
+func navigateAndWait(ctx context.Context, url, referrer, event string) error {
+	if err := page.SetLifecycleEventsEnabled(true).Do(ctx); err != nil {
+		return fmt.Errorf("enable lifecycle events: %w", err)
+	}
 
-		chromedp.ListenTarget(ctx, func(ev interface{}) {
-			switch ev.(type) {
-			case *network.EventRequestWillBeSent:
-				pendingRequests++
-				idleStart = time.Time{}
-			case *network.EventLoadingFinished, *network.EventLoadingFailed:
-				pendingRequests--
-				if pendingRequests < 0 {
-					pendingRequests = 0
-				}
-				if pendingRequests <= maxPending {
-					if idleStart.IsZero() {
-						idleStart = time.Now()
-					}
-				}
-			}
-		})
-
-		// 检查网络空闲
-		ticker := time.NewTicker(100 * time.Millisecond)
-		defer ticker.Stop()
-
-		for {
+	lctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	// 监听必须先于导航注册；回调在 chromedp 事件循环里同步执行，只做非阻塞投递
+	events := make(chan *page.EventLifecycleEvent, 256)
+	chromedp.ListenTarget(lctx, func(ev interface{}) {
+		if e, ok := ev.(*page.EventLifecycleEvent); ok {
 			select {
-			case <-timeout:
-				return nil // 超时也继续
-			case <-done:
-				return nil
-			case <-ticker.C:
-				if !idleStart.IsZero() && time.Since(idleStart) >= 500*time.Millisecond {
-					return nil
-				}
-			case <-ctx.Done():
-				return ctx.Err()
+			case events <- e:
+			default:
 			}
 		}
 	})
+
+	_, loaderID, errorText, _, err := page.Navigate(url).WithReferrer(referrer).Do(ctx)
+	if err != nil {
+		return err
+	}
+	if errorText != "" {
+		return fmt.Errorf("page load error %s", errorText)
+	}
+	if loaderID == "" {
+		return nil // 同文档导航（如锚点）不产生新文档，也没有生命周期事件
+	}
+	for {
+		select {
+		case e := <-events:
+			if e.LoaderID == loaderID && e.Name == event {
+				return nil
+			}
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 }
 
 // Click performs a click at the specified coordinates

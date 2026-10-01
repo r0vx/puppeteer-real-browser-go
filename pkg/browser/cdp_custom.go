@@ -29,8 +29,15 @@ type CustomCDPClient struct {
 	ctx            context.Context
 	cancel         context.CancelFunc
 	// 事件监听
-	eventHandlers      map[string][]func(json.RawMessage)
+	eventHandlers      map[string][]eventSub
 	eventHandlersMutex sync.RWMutex
+	nextSubID          int64
+}
+
+// eventSub 一个事件订阅，id 用于取消
+type eventSub struct {
+	id int64
+	fn func(json.RawMessage)
 }
 
 // CDPMessage represents a CDP message
@@ -102,7 +109,7 @@ func NewCustomCDPClient(debugURL string) (*CustomCDPClient, error) {
 		conn:          conn,
 		url:           wsURL,
 		responses:     make(map[int64]chan CDPResponse),
-		eventHandlers: make(map[string][]func(json.RawMessage)),
+		eventHandlers: make(map[string][]eventSub),
 		ctx:           ctx,
 		cancel:        cancel,
 	}
@@ -158,8 +165,11 @@ func (c *CustomCDPClient) handleMessages() {
 				if err := json.Unmarshal(message, &event); err == nil {
 					c.eventHandlersMutex.RLock()
 					// 复制 handlers 避免长时间持锁
-					handlers := make([]func(json.RawMessage), len(c.eventHandlers[event.Method]))
-					copy(handlers, c.eventHandlers[event.Method])
+					subs := c.eventHandlers[event.Method]
+					handlers := make([]func(json.RawMessage), len(subs))
+					for i, s := range subs {
+						handlers[i] = s.fn
+					}
 					c.eventHandlersMutex.RUnlock()
 
 					// 异步执行 handlers，避免阻塞消息循环
@@ -179,9 +189,22 @@ func (c *CustomCDPClient) handleMessages() {
 
 // OnEvent subscribes to a CDP event
 func (c *CustomCDPClient) OnEvent(method string, handler func(json.RawMessage)) {
+	c.subscribe(method, handler)
+}
+
+// subscribe 订阅事件并返回取消函数（用于导航等待这类一次性监听）
+func (c *CustomCDPClient) subscribe(method string, handler func(json.RawMessage)) (unsubscribe func()) {
 	c.eventHandlersMutex.Lock()
-	c.eventHandlers[method] = append(c.eventHandlers[method], handler)
+	c.nextSubID++
+	id := c.nextSubID
+	c.eventHandlers[method] = append(c.eventHandlers[method], eventSub{id: id, fn: handler})
 	c.eventHandlersMutex.Unlock()
+
+	return func() {
+		c.eventHandlersMutex.Lock()
+		defer c.eventHandlersMutex.Unlock()
+		c.eventHandlers[method] = slices.DeleteFunc(c.eventHandlers[method], func(s eventSub) bool { return s.id == id })
+	}
 }
 
 // sendCommand sends a CDP command and waits for response
@@ -611,6 +634,11 @@ func (p *CustomCDPPage) initialize() error {
 		return fmt.Errorf("failed to enable DOM domain: %w", err)
 	}
 
+	// 导航等待依赖 Page.lifecycleEvent（只影响 CDP 事件推送，页面侧不可见）
+	if _, err := p.client.sendCommand("Page.setLifecycleEventsEnabled", map[string]interface{}{"enabled": true}); err != nil {
+		return fmt.Errorf("failed to enable lifecycle events: %w", err)
+	}
+
 	if p.opts != nil && p.opts.Proxy != nil && p.opts.Proxy.Username != "" {
 		if err := p.setupProxyAuth(); err != nil {
 			return fmt.Errorf("failed to set up proxy auth: %w", err)
@@ -684,9 +712,84 @@ func (p *CustomCDPPage) AddScriptToEvaluateOnNewDocument(script string) error {
 	return err
 }
 
-// Navigate navigates to a URL
+// defaultNavigateTimeout 导航等待的默认超时，与 sendCommand / WaitForSelector 一致
+const defaultNavigateTimeout = 30 * time.Second
+
+// Navigate navigates to a URL and waits for the load event (same as CDPPage)
 func (p *CustomCDPPage) Navigate(url string) error {
-	return p.client.Navigate(url)
+	return p.navigate(url, "", "load", defaultNavigateTimeout)
+}
+
+// lifecycleEvent Page.lifecycleEvent 的参数
+type lifecycleEvent struct {
+	FrameID  string `json:"frameId"`
+	LoaderID string `json:"loaderId"`
+	Name     string `json:"name"`
+}
+
+// watchLifecycle 订阅生命周期事件；必须在触发导航的命令之前调用，用完调用 stop 取消订阅
+func (p *CustomCDPPage) watchLifecycle() (events <-chan lifecycleEvent, stop func()) {
+	ch := make(chan lifecycleEvent, 256)
+	stop = p.client.subscribe("Page.lifecycleEvent", func(params json.RawMessage) {
+		var ev lifecycleEvent
+		if json.Unmarshal(params, &ev) == nil {
+			select {
+			case ch <- ev:
+			default:
+			}
+		}
+	})
+	return ch, stop
+}
+
+// awaitLifecycle 等到满足 match 的生命周期事件，超时或页面上下文结束时返回错误
+func (p *CustomCDPPage) awaitLifecycle(events <-chan lifecycleEvent, deadline time.Time, what string, match func(lifecycleEvent) bool) error {
+	timer := time.NewTimer(time.Until(deadline))
+	defer timer.Stop()
+	for {
+		select {
+		case ev := <-events:
+			if match(ev) {
+				return nil
+			}
+		case <-timer.C:
+			return fmt.Errorf("timeout waiting for %s", what)
+		case <-p.ctx.Done():
+			return p.ctx.Err()
+		}
+	}
+}
+
+// navigate 导航并等待本次导航（按 loaderId 区分，不会被上一个文档的事件误触发）的指定生命周期事件
+func (p *CustomCDPPage) navigate(url, referrer, event string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	events, stop := p.watchLifecycle()
+	defer stop()
+
+	params := map[string]interface{}{"url": url}
+	if referrer != "" {
+		params["referrer"] = referrer
+	}
+	raw, err := p.client.sendCommand("Page.navigate", params)
+	if err != nil {
+		return err
+	}
+	var res struct {
+		LoaderID  string `json:"loaderId"`
+		ErrorText string `json:"errorText"`
+	}
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return fmt.Errorf("parse Page.navigate result: %w", err)
+	}
+	if res.ErrorText != "" {
+		return fmt.Errorf("page load error %s", res.ErrorText)
+	}
+	if res.LoaderID == "" {
+		return nil // 同文档导航（如锚点）不产生新文档，也没有生命周期事件
+	}
+	return p.awaitLifecycle(events, deadline, event+" of "+url, func(ev lifecycleEvent) bool {
+		return ev.LoaderID == res.LoaderID && ev.Name == event
+	})
 }
 
 // Click performs a click
@@ -1095,20 +1198,21 @@ func (p *CustomCDPPage) fulfillRequest(requestID string, response *RequestRespon
 
 // ==================== 新增方法 (按原版优化) ====================
 
-// NavigateWithOptions navigates with options
+// NavigateWithOptions navigates with options (WaitUntil / Timeout / Referrer)
 func (p *CustomCDPPage) NavigateWithOptions(url string, opts *NavigateOptions) error {
-	// CustomCDPPage 简化实现，只做基本导航
-	return p.Navigate(url)
+	if opts == nil {
+		return p.Navigate(url)
+	}
+	timeout := opts.Timeout
+	if timeout <= 0 {
+		timeout = defaultNavigateTimeout
+	}
+	return p.navigate(url, opts.Referrer, lifecycleEventName(opts.WaitUntil), timeout)
 }
 
-// NavigateWithReferrer navigates with referrer
+// NavigateWithReferrer navigates with referrer and waits for load
 func (p *CustomCDPPage) NavigateWithReferrer(url, referrer string) error {
-	params := map[string]interface{}{
-		"url":      url,
-		"referrer": referrer,
-	}
-	_, err := p.client.sendCommand("Page.navigate", params)
-	return err
+	return p.NavigateWithOptions(url, &NavigateOptions{Referrer: referrer})
 }
 
 // WaitVisible waits for element to be visible
@@ -1343,10 +1447,39 @@ func (p *CustomCDPPage) ExecuteJS(script string, result interface{}) error {
 	return nil
 }
 
-// Refresh refreshes the page
+// Refresh reloads the page and waits for the new document's load event
 func (p *CustomCDPPage) Refresh(timeout time.Duration) error {
-	_, err := p.client.sendCommand("Page.reload", nil)
-	return err
+	if timeout <= 0 {
+		timeout = defaultNavigateTimeout
+	}
+	deadline := time.Now().Add(timeout)
+
+	// 记下当前文档的 loaderId：Page.reload 不返回新 loaderId，只能等主 frame 出现不同 loaderId 的 load
+	raw, err := p.client.sendCommand("Page.getFrameTree", nil)
+	if err != nil {
+		return err
+	}
+	var tree struct {
+		FrameTree struct {
+			Frame struct {
+				ID       string `json:"id"`
+				LoaderID string `json:"loaderId"`
+			} `json:"frame"`
+		} `json:"frameTree"`
+	}
+	if err := json.Unmarshal(raw, &tree); err != nil {
+		return fmt.Errorf("parse Page.getFrameTree result: %w", err)
+	}
+	main := tree.FrameTree.Frame
+
+	events, stop := p.watchLifecycle()
+	defer stop()
+	if _, err := p.client.sendCommand("Page.reload", nil); err != nil {
+		return err
+	}
+	return p.awaitLifecycle(events, deadline, "load after reload", func(ev lifecycleEvent) bool {
+		return ev.FrameID == main.ID && ev.LoaderID != main.LoaderID && ev.Name == "load"
+	})
 }
 
 // Sleep pauses execution
