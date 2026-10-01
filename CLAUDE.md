@@ -44,7 +44,8 @@ Public entry point: `browser.Connect(ctx, opts *ConnectOptions) (*BrowserInstanc
 **Other subsystems (all in `pkg/browser`):**
 - `pool.go` — `BrowserPool` reuses instances (has a fast-path health check on `lastUsed`); `account_manager.go` — isolated persistent profiles per account (`ProfileName` / `PersistProfile`).
 - `mouse.go` + `pkg/page/controller.go` — ghost-cursor-style Bézier `RealClick`; `wait.go` — smart waits/retries.
-- `pkg/turnstile/solver.go` — background Cloudflare Turnstile auto-solver.
+- `turnstile.go` — background Cloudflare Turnstile auto-clicker, started by `Connect` when `opts.Turnstile` is set (lives in `pkg/browser` to avoid an import cycle; `pkg/turnstile` is a thin alias kept for API compatibility).
+- `process_unix.go` / `process_windows.go` — platform-specific process-group kill and graceful-shutdown signalling for `ChromeProcess`.
 - Network request interception via the `Page.OnRequest` / `InterceptedRequest.{Continue,Respond,Abort}` API; `network_fingerprint_proxy.go`.
 - Extensions: `extension_manager.go`, `extension_installer.go`, `advanced_extension_injector.go`.
 - Xvfb: `xvfb.go` (real, Linux) vs `xvfb_stub.go` (build-tag stub for non-Linux).
