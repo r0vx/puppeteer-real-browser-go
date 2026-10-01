@@ -1,10 +1,13 @@
 package browser
 
 import (
+	"bytes"
 	"crypto/md5"
 	"encoding/json"
 	"fmt"
 	"math/rand"
+	"os"
+	"slices"
 	"strings"
 	"time"
 )
@@ -12,6 +15,9 @@ import (
 // FingerprintConfig 用户指纹配置
 type FingerprintConfig struct {
 	UserID string `json:"user_id"`
+
+	// SchemaVersion 文件格式版本，见 fingerprintSchemaVersion
+	SchemaVersion int `json:"schema_version,omitempty"`
 
 	// 屏幕相关
 	Screen ScreenConfig `json:"screen"`
@@ -187,59 +193,9 @@ func NewFingerprintGenerator() *FingerprintGenerator {
 	}
 }
 
-// GenerateFingerprint 为用户生成独特指纹
+// GenerateFingerprint 为用户生成指纹：默认 Windows 身份，取值按用户 ID 确定性抽取
 func (fg *FingerprintGenerator) GenerateFingerprint(userID string) *FingerprintConfig {
-	// 使用用户ID作为种子，确保同一用户的指纹一致
-	userSeed := fg.hashUserID(userID)
-	userRand := rand.New(rand.NewSource(userSeed))
-
-	config := &FingerprintConfig{
-		UserID: userID,
-	}
-
-	// 生成屏幕配置
-	config.Screen = fg.generateScreenConfig(userRand)
-
-	// 生成浏览器配置
-	config.Browser = fg.generateBrowserConfig(userRand)
-
-	// 生成系统配置
-	config.System = fg.generateSystemConfig(userRand)
-
-	// 生成WebGL配置
-	config.WebGL = fg.generateWebGLConfig(userRand)
-
-	// 生成音频配置
-	config.Audio = fg.generateAudioConfig(userRand)
-
-	// 生成网络配置
-	config.Network = fg.generateNetworkConfig(userRand)
-
-	// 生成时区配置
-	config.Timezone = fg.generateTimezoneConfig(userRand)
-
-	// 生成Canvas配置
-	config.Canvas = fg.generateCanvasConfig(userRand)
-
-	// 生成字体配置
-	config.Fonts = fg.generateFontsConfig(userRand)
-
-	// 生成插件配置
-	config.Plugins = fg.generatePluginsConfig(userRand)
-
-	// 生成电池配置
-	config.Battery = fg.generateBatteryConfig(userRand)
-
-	// 生成媒体设备配置
-	config.MediaDevices = fg.generateMediaDevicesConfig(userRand)
-
-	// 生成TLS配置
-	config.TLSConfig = fg.generateTLSConfig(userRand)
-
-	// 生成HTTP2配置
-	config.HTTP2Config = fg.generateHTTP2Config(userRand)
-
-	return config
+	return generateFingerprintFor(userID, OSWindows)
 }
 
 // hashUserID 将用户ID转换为数值种子
@@ -255,635 +211,6 @@ func (fg *FingerprintGenerator) hashUserID(userID string) int64 {
 	}
 
 	return seed
-}
-
-// generateScreenConfig 生成屏幕配置
-func (fg *FingerprintGenerator) generateScreenConfig(userRand *rand.Rand) ScreenConfig {
-	// 大幅扩展屏幕分辨率配置 - 基于实际市场统计
-	type ResolutionConfig struct {
-		width      int
-		height     int
-		weight     int       // 权重：数字越大越常见
-		dprOptions []float64 // 可能的设备像素比
-	}
-
-	resolutionConfigs := []ResolutionConfig{
-		// ========== 最常见的桌面分辨率 ==========
-		{1920, 1080, 35, []float64{1.0, 1.25}}, // Full HD - 最常见
-		{1366, 768, 15, []float64{1.0}},        // 老笔记本标准
-		{1536, 864, 10, []float64{1.0, 1.25}},  // 常见笔记本
-		{1440, 900, 8, []float64{1.0}},         // 16:10笔记本
-		{1600, 900, 7, []float64{1.0}},         // HD+
-
-		// ========== 2K分辨率 ==========
-		{2560, 1440, 20, []float64{1.0, 1.25, 1.5}}, // 2K - 很常见
-		{2560, 1600, 5, []float64{2.0}},             // 16:10 2K
-		{2048, 1152, 3, []float64{1.0}},             // 2K变体
-
-		// ========== 高分辨率 ==========
-		{3840, 2160, 12, []float64{1.0, 1.5, 2.0}}, // 4K UHD
-		{3440, 1440, 4, []float64{1.0, 1.25}},      // 超宽屏
-		{3840, 1600, 2, []float64{1.0}},            // 超宽屏
-		{3840, 1080, 1, []float64{1.0}},            // 超宽32:9
-
-		// ========== MacBook常见分辨率（高DPI）==========
-		{1440, 900, 8, []float64{2.0}},  // MacBook Pro 13" Retina
-		{1680, 1050, 6, []float64{2.0}}, // MacBook Pro 15"
-		{1728, 1117, 4, []float64{2.0}}, // MacBook Air 13" M1/M2
-		{1920, 1200, 7, []float64{2.0}}, // MacBook Pro 16"
-		{2560, 1600, 5, []float64{2.0}}, // MacBook Pro 14"/16" (缩放)
-		{3024, 1964, 3, []float64{2.0}}, // MacBook Pro 14" M1/M2 原生
-		{3456, 2234, 3, []float64{2.0}}, // MacBook Pro 16" M1/M2 原生
-
-		// ========== iMac/Studio Display ==========
-		{2560, 1440, 4, []float64{2.0}}, // iMac 27"
-		{2880, 1800, 2, []float64{2.0}}, // iMac 27" Retina
-		{5120, 2880, 2, []float64{2.0}}, // iMac 27" 5K
-
-		// ========== Windows高DPI笔记本 ==========
-		{1920, 1080, 10, []float64{1.5, 2.0}}, // Full HD高DPI
-		{2160, 1440, 4, []float64{1.5}},       // Surface Laptop
-		{2256, 1504, 3, []float64{1.5}},       // Surface Pro
-		{2880, 1800, 3, []float64{2.0}},       // Dell XPS 15
-		{3000, 2000, 2, []float64{2.0}},       // Surface Laptop Studio
-		{3200, 1800, 3, []float64{1.5, 2.0}},  // QHD+
-		{3200, 2000, 2, []float64{2.0}},       // Surface Book
-
-		// ========== 垂直显示器和特殊比例 ==========
-		{1200, 1920, 1, []float64{1.0}}, // 竖屏1080p
-		{1080, 1920, 1, []float64{1.0}}, // 竖屏
-		{2160, 3840, 1, []float64{1.0}}, // 竖屏4K
-
-		// ========== 老旧但仍在使用的分辨率 ==========
-		{1280, 720, 5, []float64{1.0}},  // HD
-		{1280, 1024, 4, []float64{1.0}}, // 5:4老显示器
-		{1024, 768, 2, []float64{1.0}},  // XGA老显示器
-		{1680, 1050, 3, []float64{1.0}}, // WSXGA+
-
-		// ========== 游戏/专业显示器 ==========
-		{3440, 1440, 3, []float64{1.0}}, // 21:9超宽
-		{5120, 1440, 1, []float64{1.0}}, // 32:9超超宽
-		{2560, 1080, 2, []float64{1.0}}, // 21:9 1080p
-	}
-
-	// 加权随机选择分辨率
-	totalWeight := 0
-	for _, rc := range resolutionConfigs {
-		totalWeight += rc.weight
-	}
-
-	randWeight := userRand.Intn(totalWeight)
-	var selectedConfig ResolutionConfig
-	currentWeight := 0
-	for _, rc := range resolutionConfigs {
-		currentWeight += rc.weight
-		if randWeight < currentWeight {
-			selectedConfig = rc
-			break
-		}
-	}
-
-	width, height := selectedConfig.width, selectedConfig.height
-
-	// 从该分辨率的DPR选项中选择
-	devicePixelRatio := selectedConfig.dprOptions[userRand.Intn(len(selectedConfig.dprOptions))]
-
-	// 任务栏高度变化（更真实的分布）
-	taskbarHeights := []int{0, 30, 40, 48, 60, 72} // Windows/macOS不同任务栏高度
-	taskbarHeight := taskbarHeights[userRand.Intn(len(taskbarHeights))]
-
-	// 侧边栏宽度（某些系统有侧边栏）
-	sidebarWidth := 0
-	if userRand.Float64() < 0.1 { // 10%概率有侧边栏
-		sidebarWidth = userRand.Intn(20) + 10 // 10-30px
-	}
-
-	return ScreenConfig{
-		Width:            width,
-		Height:           height,
-		AvailWidth:       width - sidebarWidth,
-		AvailHeight:      height - taskbarHeight,
-		ColorDepth:       24,
-		PixelDepth:       24,
-		DevicePixelRatio: devicePixelRatio,
-	}
-}
-
-// generateBrowserConfig 生成浏览器配置
-func (fg *FingerprintGenerator) generateBrowserConfig(userRand *rand.Rand) BrowserConfig {
-	// 大幅扩展Chrome版本池 - 涵盖最近2年的版本（2024年12月更新）
-	chromeVersions := []string{
-		// 2024年12月-2025年最新版本
-		"142.0.7444.176", "141.0.7432.137", "140.0.7486.110", "139.0.7468.126",
-		"138.0.7414.140", "137.0.7355.172", "136.0.7289.145", "135.0.7260.157",
-		// 2024年下半年版本
-		"134.0.7212.168", "133.0.7156.193", "132.0.7098.224", "131.0.6778.204",
-		"130.0.6723.117", "129.0.6668.100", "128.0.6613.138", "127.0.6533.120",
-		"126.0.6478.127", "125.0.6422.142", "124.0.6367.207", "123.0.6312.122",
-		// 2024年上半年版本
-		"122.0.6261.129", "121.0.6167.185", "120.0.6099.234", "119.0.6045.199",
-		"118.0.5993.117", "117.0.5938.149", "116.0.5845.187", "115.0.5790.170",
-		// 2023年稳定版本
-		"114.0.5735.198", "113.0.5672.126", "112.0.5615.137", "111.0.5563.146",
-		"110.0.5481.177", "109.0.5414.119", "108.0.5359.124", "107.0.5304.121",
-		// 2023年早期版本
-		"106.0.5249.119", "105.0.5195.125", "104.0.5112.101", "103.0.5060.134",
-		"102.0.5005.115", "101.0.4951.67", "100.0.4896.127", "99.0.4844.84",
-	}
-	chromeVersion := chromeVersions[userRand.Intn(len(chromeVersions))]
-
-	// 扩展操作系统平台配置
-	type PlatformConfig struct {
-		Platform string
-		OSName   string
-		Versions []string
-	}
-
-	platformConfigs := []PlatformConfig{
-		// macOS - 多个版本和架构
-		{
-			Platform: "MacIntel",
-			OSName:   "Macintosh; Intel Mac OS X",
-			Versions: []string{
-				"10_15_7",                    // Catalina
-				"11_0_0", "11_2_3", "11_6_8", // Big Sur
-				"12_0_0", "12_3_1", "12_6_9", // Monterey
-				"13_0_0", "13_2_1", "13_5_2", "13_6_1", // Ventura
-				"14_0_0", "14_1_2", "14_3_1", "14_5_0", // Sonoma
-			},
-		},
-		// Apple Silicon Mac
-		{
-			Platform: "MacIntel", // 注意：M系列仍报告为MacIntel
-			OSName:   "Macintosh; Intel Mac OS X",
-			Versions: []string{
-				"12_0_0", "12_4_0", "13_0_0", "13_3_0", "14_0_0", "14_2_1",
-			},
-		},
-		// Windows 10 - 多个构建版本
-		{
-			Platform: "Win32",
-			OSName:   "Windows NT 10.0; Win64; x64",
-			Versions: []string{
-				"10.0", // 多个构建号实际上UA中都显示10.0
-			},
-		},
-		// Windows 11
-		{
-			Platform: "Win32",
-			OSName:   "Windows NT 10.0; Win64; x64", // Win11仍报告为10.0
-			Versions: []string{
-				"10.0",
-			},
-		},
-		// Linux发行版
-		{
-			Platform: "Linux x86_64",
-			OSName:   "X11; Linux x86_64",
-			Versions: []string{
-				"", // Linux不在UA中显示具体版本
-			},
-		},
-		{
-			Platform: "Linux x86_64",
-			OSName:   "X11; Ubuntu; Linux x86_64",
-			Versions: []string{""},
-		},
-		{
-			Platform: "Linux x86_64",
-			OSName:   "X11; Fedora; Linux x86_64",
-			Versions: []string{""},
-		},
-	}
-
-	platformConfig := platformConfigs[userRand.Intn(len(platformConfigs))]
-
-	// 构建UserAgent
-	var userAgent string
-	if len(platformConfig.Versions) > 0 && platformConfig.Versions[0] != "" {
-		version := platformConfig.Versions[userRand.Intn(len(platformConfig.Versions))]
-		userAgent = fmt.Sprintf("Mozilla/5.0 (%s %s) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/%s Safari/537.36",
-			platformConfig.OSName, version, chromeVersion)
-	} else {
-		userAgent = fmt.Sprintf("Mozilla/5.0 (%s) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/%s Safari/537.36",
-			platformConfig.OSName, chromeVersion)
-	}
-
-	// 扩展语言配置 - 增加更多语言和组合
-	languages := [][]string{
-		// 英语系
-		{"en-US", "en"},
-		{"en-GB", "en"},
-		{"en-AU", "en"},
-		{"en-CA", "en"},
-		{"en-US", "en", "es"}, // 双语用户
-		// 中文系
-		{"zh-CN", "zh"},
-		{"zh-TW", "zh"},
-		{"zh-HK", "zh"},
-		{"zh-CN", "zh", "en"}, // 双语用户
-		// 日语系
-		{"ja-JP", "ja"},
-		{"ja", "ja", "en"},
-		// 韩语系
-		{"ko-KR", "ko"},
-		{"ko", "ko", "en"},
-		// 欧洲语言
-		{"de-DE", "de"},
-		{"de-DE", "de", "en"},
-		{"fr-FR", "fr"},
-		{"fr-FR", "fr", "en"},
-		{"es-ES", "es"},
-		{"es-ES", "es", "en"},
-		{"it-IT", "it"},
-		{"pt-BR", "pt"},
-		{"pt-PT", "pt"},
-		{"ru-RU", "ru"},
-		{"pl-PL", "pl"},
-		{"nl-NL", "nl"},
-		{"sv-SE", "sv"},
-		{"tr-TR", "tr"},
-		// 其他
-		{"ar-SA", "ar"},
-		{"th-TH", "th"},
-		{"vi-VN", "vi"},
-		{"id-ID", "id"},
-	}
-	selectedLangs := languages[userRand.Intn(len(languages))]
-
-	// 更真实的硬件并发数分布（基于实际设备统计）
-	hardwareConcurrencyWeights := []struct {
-		cores  int
-		weight int // 权重，数字越大越常见
-	}{
-		{2, 5},   // 老旧设备
-		{4, 20},  // 最常见：入门级笔记本、台式机
-		{6, 15},  // 常见：中端设备
-		{8, 25},  // 最常见：主流设备
-		{10, 8},  // 较少：高端Intel
-		{12, 12}, // 常见：高端AMD/M系列
-		{14, 4},  // 较少
-		{16, 8},  // 工作站
-		{20, 2},  // 少见：高端工作站
-		{24, 1},  // 罕见：专业工作站
-	}
-
-	// 加权随机选择
-	totalWeight := 0
-	for _, hw := range hardwareConcurrencyWeights {
-		totalWeight += hw.weight
-	}
-	randWeight := userRand.Intn(totalWeight)
-	hardwareConcurrency := 8 // 默认
-	currentWeight := 0
-	for _, hw := range hardwareConcurrencyWeights {
-		currentWeight += hw.weight
-		if randWeight < currentWeight {
-			hardwareConcurrency = hw.cores
-			break
-		}
-	}
-
-	// MaxTouchPoints - 更真实的分布
-	maxTouchPoints := 0
-	if platformConfig.Platform == "Win32" {
-		// Windows设备可能有触摸屏
-		if userRand.Float64() < 0.3 { // 30%概率
-			maxTouchPoints = userRand.Intn(10) + 1 // 1-10点触控
-		}
-	}
-
-	return BrowserConfig{
-		UserAgent:           userAgent,
-		Language:            selectedLangs[0],
-		Languages:           selectedLangs,
-		Platform:            platformConfig.Platform,
-		Vendor:              "Google Inc.",
-		CookieEnabled:       true,
-		DoNotTrack:          nil, // 通常为null
-		HardwareConcurrency: hardwareConcurrency,
-		MaxTouchPoints:      maxTouchPoints,
-		WebDriver:           nil, // 反检测：设为undefined
-	}
-}
-
-// generateSystemConfig 生成系统配置
-func (fg *FingerprintGenerator) generateSystemConfig(userRand *rand.Rand) SystemConfig {
-	systems := []SystemConfig{
-		{"macOS", "14.0", "x64"},
-		{"Windows", "10", "x64"},
-		{"Linux", "Ubuntu 20.04", "x64"},
-		{"Windows", "11", "x64"},
-		{"macOS", "13.0", "x64"},
-	}
-
-	return systems[userRand.Intn(len(systems))]
-}
-
-// generateWebGLConfig 生成WebGL配置
-func (fg *FingerprintGenerator) generateWebGLConfig(userRand *rand.Rand) WebGLConfig {
-	// 大幅扩展WebGL配置池 - 包含各种GPU型号
-	webglConfigs := []WebGLConfig{
-		// ========== macOS - Apple Silicon ==========
-		{
-			Vendor:                 "Apple Inc.",
-			Renderer:               "ANGLE (Apple, Apple M1 Pro, OpenGL 4.1 Metal - 88.1)",
-			Version:                "WebGL 1.0 (OpenGL ES 2.0 Chromium)",
-			ShadingLanguageVersion: "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)",
-			MaxTextureSize:         16384,
-			MaxRenderbufferSize:    16384,
-		},
-		{
-			Vendor:                 "Apple Inc.",
-			Renderer:               "ANGLE (Apple, Apple M1 Max, OpenGL 4.1 Metal - 88.1)",
-			Version:                "WebGL 1.0 (OpenGL ES 2.0 Chromium)",
-			ShadingLanguageVersion: "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)",
-			MaxTextureSize:         16384,
-			MaxRenderbufferSize:    16384,
-		},
-		{
-			Vendor:                 "Apple Inc.",
-			Renderer:               "ANGLE (Apple, Apple M2, OpenGL 4.1 Metal - 88.1)",
-			Version:                "WebGL 1.0 (OpenGL ES 2.0 Chromium)",
-			ShadingLanguageVersion: "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)",
-			MaxTextureSize:         16384,
-			MaxRenderbufferSize:    16384,
-		},
-		{
-			Vendor:                 "Apple Inc.",
-			Renderer:               "ANGLE (Apple, Apple M2 Pro, OpenGL 4.1 Metal - 88.1)",
-			Version:                "WebGL 1.0 (OpenGL ES 2.0 Chromium)",
-			ShadingLanguageVersion: "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)",
-			MaxTextureSize:         16384,
-			MaxRenderbufferSize:    16384,
-		},
-		{
-			Vendor:                 "Apple Inc.",
-			Renderer:               "ANGLE (Apple, Apple M2 Max, OpenGL 4.1 Metal - 88.1)",
-			Version:                "WebGL 1.0 (OpenGL ES 2.0 Chromium)",
-			ShadingLanguageVersion: "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)",
-			MaxTextureSize:         16384,
-			MaxRenderbufferSize:    16384,
-		},
-		{
-			Vendor:                 "Apple Inc.",
-			Renderer:               "ANGLE (Apple, Apple M3, OpenGL 4.1 Metal - 88.1)",
-			Version:                "WebGL 1.0 (OpenGL ES 2.0 Chromium)",
-			ShadingLanguageVersion: "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)",
-			MaxTextureSize:         16384,
-			MaxRenderbufferSize:    16384,
-		},
-
-		// ========== macOS - Intel集成显卡 ==========
-		{
-			Vendor:                 "Intel Inc.",
-			Renderer:               "ANGLE (Intel, Intel(R) Iris(TM) Plus Graphics 640, OpenGL 4.1)",
-			Version:                "WebGL 1.0 (OpenGL ES 2.0 Chromium)",
-			ShadingLanguageVersion: "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)",
-			MaxTextureSize:         16384,
-			MaxRenderbufferSize:    16384,
-		},
-		{
-			Vendor:                 "Intel Inc.",
-			Renderer:               "ANGLE (Intel, Intel(R) UHD Graphics 630, OpenGL 4.1)",
-			Version:                "WebGL 1.0 (OpenGL ES 2.0 Chromium)",
-			ShadingLanguageVersion: "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)",
-			MaxTextureSize:         16384,
-			MaxRenderbufferSize:    16384,
-		},
-
-		// ========== macOS - AMD独立显卡 ==========
-		{
-			Vendor:                 "ATI Technologies Inc.",
-			Renderer:               "ANGLE (AMD, AMD Radeon Pro 5500M, OpenGL 4.1)",
-			Version:                "WebGL 1.0 (OpenGL ES 2.0 Chromium)",
-			ShadingLanguageVersion: "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)",
-			MaxTextureSize:         16384,
-			MaxRenderbufferSize:    16384,
-		},
-		{
-			Vendor:                 "ATI Technologies Inc.",
-			Renderer:               "ANGLE (AMD, AMD Radeon Pro 560X, OpenGL 4.1)",
-			Version:                "WebGL 1.0 (OpenGL ES 2.0 Chromium)",
-			ShadingLanguageVersion: "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)",
-			MaxTextureSize:         16384,
-			MaxRenderbufferSize:    16384,
-		},
-
-		// ========== Windows - Intel集成显卡 ==========
-		{
-			Vendor:                 "Google Inc. (Intel)",
-			Renderer:               "ANGLE (Intel, Intel(R) UHD Graphics 630 Direct3D11 vs_5_0 ps_5_0, D3D11)",
-			Version:                "WebGL 1.0 (OpenGL ES 2.0 Chromium)",
-			ShadingLanguageVersion: "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)",
-			MaxTextureSize:         16384,
-			MaxRenderbufferSize:    16384,
-		},
-		{
-			Vendor:                 "Google Inc. (Intel)",
-			Renderer:               "ANGLE (Intel, Intel(R) UHD Graphics 620 Direct3D11 vs_5_0 ps_5_0, D3D11)",
-			Version:                "WebGL 1.0 (OpenGL ES 2.0 Chromium)",
-			ShadingLanguageVersion: "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)",
-			MaxTextureSize:         16384,
-			MaxRenderbufferSize:    16384,
-		},
-		{
-			Vendor:                 "Google Inc. (Intel)",
-			Renderer:               "ANGLE (Intel, Intel(R) Iris(R) Xe Graphics Direct3D11 vs_5_0 ps_5_0, D3D11)",
-			Version:                "WebGL 1.0 (OpenGL ES 2.0 Chromium)",
-			ShadingLanguageVersion: "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)",
-			MaxTextureSize:         16384,
-			MaxRenderbufferSize:    16384,
-		},
-		{
-			Vendor:                 "Google Inc. (Intel)",
-			Renderer:               "ANGLE (Intel, Intel(R) HD Graphics 530 Direct3D11 vs_5_0 ps_5_0, D3D11)",
-			Version:                "WebGL 1.0 (OpenGL ES 2.0 Chromium)",
-			ShadingLanguageVersion: "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)",
-			MaxTextureSize:         16384,
-			MaxRenderbufferSize:    16384,
-		},
-
-		// ========== Windows - NVIDIA显卡（最丰富）==========
-		{
-			Vendor:                 "Google Inc. (NVIDIA)",
-			Renderer:               "ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)",
-			Version:                "WebGL 1.0 (OpenGL ES 2.0 Chromium)",
-			ShadingLanguageVersion: "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)",
-			MaxTextureSize:         32768,
-			MaxRenderbufferSize:    32768,
-		},
-		{
-			Vendor:                 "Google Inc. (NVIDIA)",
-			Renderer:               "ANGLE (NVIDIA, NVIDIA GeForce RTX 3070 Direct3D11 vs_5_0 ps_5_0, D3D11)",
-			Version:                "WebGL 1.0 (OpenGL ES 2.0 Chromium)",
-			ShadingLanguageVersion: "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)",
-			MaxTextureSize:         32768,
-			MaxRenderbufferSize:    32768,
-		},
-		{
-			Vendor:                 "Google Inc. (NVIDIA)",
-			Renderer:               "ANGLE (NVIDIA, NVIDIA GeForce RTX 3080 Direct3D11 vs_5_0 ps_5_0, D3D11)",
-			Version:                "WebGL 1.0 (OpenGL ES 2.0 Chromium)",
-			ShadingLanguageVersion: "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)",
-			MaxTextureSize:         32768,
-			MaxRenderbufferSize:    32768,
-		},
-		{
-			Vendor:                 "Google Inc. (NVIDIA)",
-			Renderer:               "ANGLE (NVIDIA, NVIDIA GeForce RTX 4060 Direct3D11 vs_5_0 ps_5_0, D3D11)",
-			Version:                "WebGL 1.0 (OpenGL ES 2.0 Chromium)",
-			ShadingLanguageVersion: "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)",
-			MaxTextureSize:         32768,
-			MaxRenderbufferSize:    32768,
-		},
-		{
-			Vendor:                 "Google Inc. (NVIDIA)",
-			Renderer:               "ANGLE (NVIDIA, NVIDIA GeForce RTX 4070 Direct3D11 vs_5_0 ps_5_0, D3D11)",
-			Version:                "WebGL 1.0 (OpenGL ES 2.0 Chromium)",
-			ShadingLanguageVersion: "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)",
-			MaxTextureSize:         32768,
-			MaxRenderbufferSize:    32768,
-		},
-		{
-			Vendor:                 "Google Inc. (NVIDIA)",
-			Renderer:               "ANGLE (NVIDIA, NVIDIA GeForce GTX 1650 Direct3D11 vs_5_0 ps_5_0, D3D11)",
-			Version:                "WebGL 1.0 (OpenGL ES 2.0 Chromium)",
-			ShadingLanguageVersion: "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)",
-			MaxTextureSize:         16384,
-			MaxRenderbufferSize:    16384,
-		},
-		{
-			Vendor:                 "Google Inc. (NVIDIA)",
-			Renderer:               "ANGLE (NVIDIA, NVIDIA GeForce GTX 1660 Ti Direct3D11 vs_5_0 ps_5_0, D3D11)",
-			Version:                "WebGL 1.0 (OpenGL ES 2.0 Chromium)",
-			ShadingLanguageVersion: "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)",
-			MaxTextureSize:         16384,
-			MaxRenderbufferSize:    16384,
-		},
-		{
-			Vendor:                 "Google Inc. (NVIDIA)",
-			Renderer:               "ANGLE (NVIDIA, NVIDIA GeForce RTX 2060 Direct3D11 vs_5_0 ps_5_0, D3D11)",
-			Version:                "WebGL 1.0 (OpenGL ES 2.0 Chromium)",
-			ShadingLanguageVersion: "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)",
-			MaxTextureSize:         32768,
-			MaxRenderbufferSize:    32768,
-		},
-		{
-			Vendor:                 "Google Inc. (NVIDIA)",
-			Renderer:               "ANGLE (NVIDIA, NVIDIA GeForce RTX 2070 SUPER Direct3D11 vs_5_0 ps_5_0, D3D11)",
-			Version:                "WebGL 1.0 (OpenGL ES 2.0 Chromium)",
-			ShadingLanguageVersion: "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)",
-			MaxTextureSize:         32768,
-			MaxRenderbufferSize:    32768,
-		},
-		{
-			Vendor:                 "Google Inc. (NVIDIA)",
-			Renderer:               "ANGLE (NVIDIA, NVIDIA GeForce MX450 Direct3D11 vs_5_0 ps_5_0, D3D11)",
-			Version:                "WebGL 1.0 (OpenGL ES 2.0 Chromium)",
-			ShadingLanguageVersion: "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)",
-			MaxTextureSize:         16384,
-			MaxRenderbufferSize:    16384,
-		},
-
-		// ========== Windows - AMD显卡 ==========
-		{
-			Vendor:                 "Google Inc. (AMD)",
-			Renderer:               "ANGLE (AMD, AMD Radeon(TM) Graphics Direct3D11 vs_5_0 ps_5_0, D3D11)",
-			Version:                "WebGL 1.0 (OpenGL ES 2.0 Chromium)",
-			ShadingLanguageVersion: "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)",
-			MaxTextureSize:         16384,
-			MaxRenderbufferSize:    16384,
-		},
-		{
-			Vendor:                 "Google Inc. (AMD)",
-			Renderer:               "ANGLE (AMD, AMD Radeon RX 6600 XT Direct3D11 vs_5_0 ps_5_0, D3D11)",
-			Version:                "WebGL 1.0 (OpenGL ES 2.0 Chromium)",
-			ShadingLanguageVersion: "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)",
-			MaxTextureSize:         16384,
-			MaxRenderbufferSize:    16384,
-		},
-		{
-			Vendor:                 "Google Inc. (AMD)",
-			Renderer:               "ANGLE (AMD, AMD Radeon RX 6700 XT Direct3D11 vs_5_0 ps_5_0, D3D11)",
-			Version:                "WebGL 1.0 (OpenGL ES 2.0 Chromium)",
-			ShadingLanguageVersion: "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)",
-			MaxTextureSize:         16384,
-			MaxRenderbufferSize:    16384,
-		},
-		{
-			Vendor:                 "Google Inc. (AMD)",
-			Renderer:               "ANGLE (AMD, AMD Radeon RX 5700 XT Direct3D11 vs_5_0 ps_5_0, D3D11)",
-			Version:                "WebGL 1.0 (OpenGL ES 2.0 Chromium)",
-			ShadingLanguageVersion: "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)",
-			MaxTextureSize:         16384,
-			MaxRenderbufferSize:    16384,
-		},
-		{
-			Vendor:                 "Google Inc. (AMD)",
-			Renderer:               "ANGLE (AMD, AMD Radeon RX 580 Series Direct3D11 vs_5_0 ps_5_0, D3D11)",
-			Version:                "WebGL 1.0 (OpenGL ES 2.0 Chromium)",
-			ShadingLanguageVersion: "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)",
-			MaxTextureSize:         16384,
-			MaxRenderbufferSize:    16384,
-		},
-		{
-			Vendor:                 "Google Inc. (AMD)",
-			Renderer:               "ANGLE (AMD, AMD Radeon RX Vega 56 Direct3D11 vs_5_0 ps_5_0, D3D11)",
-			Version:                "WebGL 1.0 (OpenGL ES 2.0 Chromium)",
-			ShadingLanguageVersion: "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)",
-			MaxTextureSize:         16384,
-			MaxRenderbufferSize:    16384,
-		},
-
-		// ========== Linux - NVIDIA ==========
-		{
-			Vendor:                 "NVIDIA Corporation",
-			Renderer:               "NVIDIA GeForce RTX 3060/PCIe/SSE2",
-			Version:                "WebGL 1.0 (OpenGL ES 2.0 Chromium)",
-			ShadingLanguageVersion: "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)",
-			MaxTextureSize:         32768,
-			MaxRenderbufferSize:    32768,
-		},
-		{
-			Vendor:                 "NVIDIA Corporation",
-			Renderer:               "NVIDIA GeForce GTX 1660 Ti/PCIe/SSE2",
-			Version:                "WebGL 1.0 (OpenGL ES 2.0 Chromium)",
-			ShadingLanguageVersion: "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)",
-			MaxTextureSize:         32768,
-			MaxRenderbufferSize:    32768,
-		},
-
-		// ========== Linux - AMD/Mesa ==========
-		{
-			Vendor:                 "X.Org",
-			Renderer:               "AMD Radeon RX 6600 (navi23, LLVM 15.0.7, DRM 3.54, 6.5.0-28-generic)",
-			Version:                "WebGL 1.0 (OpenGL ES 2.0 Chromium)",
-			ShadingLanguageVersion: "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)",
-			MaxTextureSize:         16384,
-			MaxRenderbufferSize:    16384,
-		},
-		{
-			Vendor:                 "Mesa",
-			Renderer:               "Mesa Intel(R) UHD Graphics 630 (CFL GT2)",
-			Version:                "WebGL 1.0 (OpenGL ES 2.0 Chromium)",
-			ShadingLanguageVersion: "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)",
-			MaxTextureSize:         16384,
-			MaxRenderbufferSize:    16384,
-		},
-
-		// ========== WebKit (Safari风格 - 备用) ==========
-		{
-			Vendor:                 "WebKit",
-			Renderer:               "WebKit WebGL",
-			Version:                "WebGL 1.0 (OpenGL ES 2.0 Chromium)",
-			ShadingLanguageVersion: "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)",
-			MaxTextureSize:         16384,
-			MaxRenderbufferSize:    16384,
-		},
-	}
-
-	return webglConfigs[userRand.Intn(len(webglConfigs))]
 }
 
 // generateAudioConfig 生成音频配置
@@ -911,21 +238,6 @@ func (fg *FingerprintGenerator) generateNetworkConfig(userRand *rand.Rand) Netwo
 		RTT:           rtts[userRand.Intn(len(rtts))],
 		SaveData:      userRand.Float64() < 0.1, // 10%概率启用省流量模式
 	}
-}
-
-// generateTimezoneConfig 生成时区配置
-func (fg *FingerprintGenerator) generateTimezoneConfig(userRand *rand.Rand) TimezoneConfig {
-	timezones := []TimezoneConfig{
-		{-480, "Asia/Shanghai"},
-		{0, "UTC"},
-		{-300, "America/New_York"},
-		{-480, "America/Los_Angeles"},
-		{60, "Europe/Berlin"},
-		{540, "Asia/Tokyo"},
-		{-180, "America/Sao_Paulo"},
-	}
-
-	return timezones[userRand.Intn(len(timezones))]
 }
 
 // generateCanvasConfig 生成Canvas配置
@@ -1174,14 +486,6 @@ func (fg *FingerprintGenerator) generateHTTP2Config(userRand *rand.Rand) HTTP2Co
 	}
 }
 
-// min 返回两个整数中的较小值
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 // SaveToFile 保存配置到文件
 func (config *FingerprintConfig) SaveToFile(filepath string) error {
 	data, err := json.MarshalIndent(config, "", "  ")
@@ -1300,4 +604,140 @@ func readFile(filepath string) ([]byte, error) {
 	// 这里需要实现文件读取逻辑
 	// 在实际项目中应该使用 ioutil.ReadFile 或类似函数
 	return nil, nil
+}
+
+// fingerprintSchemaVersion 当前指纹格式：2 = 自洽的 Windows / macOS 身份（UA 只用于判定系统，版本运行时跟随真实浏览器）
+const fingerprintSchemaVersion = 2
+
+// Normalize 把指纹规范化为自洽的 Windows / macOS 身份，返回是否有改动（调用方据此回写文件）。
+// 只修正身份相关字段，其余字段原样保留；对已规范化的配置幂等
+func (config *FingerprintConfig) Normalize() bool {
+	before, _ := json.Marshal(config)
+	osf := osFromUserAgent(config.Browser.UserAgent)
+	seed := func(purpose string) uint64 { return identitySeed(config.UserID, purpose) }
+
+	major := uaMajorVersion(config.Browser.UserAgent)
+	if major == "" {
+		major = "120"
+	}
+	config.Browser.UserAgent = canonicalUserAgent(osf, major)
+	config.Browser.Platform = platformFor(osf)
+	config.Browser.Vendor = "Google Inc."
+	if !containsValue(platformVersionsFor(osf), config.Browser.PlatformVersion) {
+		config.Browser.PlatformVersion = pickWeighted(platformVersionsFor(osf), seed("platform-version"))
+	}
+
+	// 语言：languages 首项必须等于 language
+	if config.Browser.Language == "" {
+		config.Browser.Language = "zh-CN"
+	}
+	if len(config.Browser.Languages) == 0 || config.Browser.Languages[0] != config.Browser.Language {
+		config.Browser.Languages = defaultLanguages(config.Browser.Language)
+	}
+
+	// 时区：必须是可加载的地区时区（UTC 等不像真实用户），否则由语言推导
+	if !plausibleTimezone(config.Timezone.Timezone) {
+		config.Timezone.Timezone, _ = getTimezoneForLanguage(config.Browser.Language)
+	}
+
+	// 屏幕：不像该系统的真实设备时按用户 ID 重选；可用区域按系统规则重算
+	if !plausibleScreen(osf, config.Screen) {
+		s := pickWeighted(screensFor(osf), seed("screen"))
+		config.Screen.Width, config.Screen.Height, config.Screen.DevicePixelRatio = s.Width, s.Height, s.DPR
+	}
+	spec, _ := screenSpecFor(osf, config.Screen.Width, config.Screen.Height, config.Screen.DevicePixelRatio)
+	g := geometryFor(osf, spec, config.Browser.PlatformVersion)
+	config.Screen.AvailWidth, config.Screen.AvailHeight = g.AvailWidth, g.AvailHeight
+	config.Screen.ColorDepth, config.Screen.PixelDepth = 24, 24
+
+	if !containsValue(coresFor(osf), config.Browser.HardwareConcurrency) {
+		config.Browser.HardwareConcurrency = pickWeighted(coresFor(osf), seed("cores"))
+	}
+
+	// 显卡：不在池中（含 "(Build N)" 等不可能的串）时尽量在同厂商里重选，能力参数与之对齐
+	gpu, ok := lookupGPU(osf, config.WebGL.Renderer)
+	if !ok {
+		gpu = pickGPU(osf, gpuFamily(config.WebGL.Vendor, config.WebGL.Renderer), seed("gpu"))
+	}
+	config.WebGL.Vendor, config.WebGL.Renderer = gpu.Vendor, gpu.Renderer
+	config.WebGL.Version = "WebGL 1.0 (OpenGL ES 2.0 Chromium)"
+	config.WebGL.ShadingLanguageVersion = "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)"
+	config.WebGL.MaxTextureSize, config.WebGL.MaxRenderbufferSize = gpu.Caps.MaxTextureSize, gpu.Caps.MaxRenderbufferSize
+
+	config.SchemaVersion = fingerprintSchemaVersion
+	after, _ := json.Marshal(config)
+	return !bytes.Equal(before, after)
+}
+
+// containsValue 池中是否有该取值
+func containsValue[T comparable](items []weighted[T], v T) bool {
+	return slices.ContainsFunc(items, func(w weighted[T]) bool { return w.Value == v })
+}
+
+// defaultLanguages 由主语言推导 navigator.languages：带地区时追加基础语言（zh-CN → zh-CN, zh）
+func defaultLanguages(lang string) []string {
+	if base, _, ok := strings.Cut(lang, "-"); ok {
+		return []string{lang, base}
+	}
+	return []string{lang}
+}
+
+// plausibleTimezone 是否为可加载的地区时区（排除 UTC、Etc/* 这类不像真实用户的值）
+func plausibleTimezone(tz string) bool {
+	if !strings.Contains(tz, "/") || strings.HasPrefix(tz, "Etc/") {
+		return false
+	}
+	_, err := time.LoadLocation(tz)
+	return err == nil
+}
+
+// plausibleScreen 屏幕是否像该系统的真实设备：池中的规格直接通过，否则按尺寸与 DPR 范围判断
+func plausibleScreen(osf OSFamily, s ScreenConfig) bool {
+	if _, ok := screenSpecFor(osf, s.Width, s.Height, s.DevicePixelRatio); ok {
+		return true
+	}
+	if s.Width <= s.Height || s.Width < 1280 || s.Width > 2560 || s.Height < 720 || s.Height > 1600 {
+		return false
+	}
+	if osf == OSMac {
+		return s.DevicePixelRatio == 1 || s.DevicePixelRatio == 2
+	}
+	return s.DevicePixelRatio == 1 || s.DevicePixelRatio == 1.25 || s.DevicePixelRatio == 1.5
+}
+
+// LoadFingerprintConfigFile 从 JSON 文件读取指纹（不做规范化）
+func LoadFingerprintConfigFile(path string) (*FingerprintConfig, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read fingerprint %s: %w", path, err)
+	}
+	var c FingerprintConfig
+	if err := json.Unmarshal(data, &c); err != nil {
+		return nil, fmt.Errorf("parse fingerprint %s: %w", path, err)
+	}
+	return &c, nil
+}
+
+// generateFingerprintFor 生成指定系统的新指纹；身份字段由 Normalize 按用户 ID 确定性补齐，
+// 与身份无关的字段（旧注入脚本、网络指纹代理在用）沿用原生成器，同样按用户 ID 确定
+func generateFingerprintFor(userID string, osf OSFamily) *FingerprintConfig {
+	fg := &FingerprintGenerator{}
+	r := rand.New(rand.NewSource(fg.hashUserID(userID)))
+	c := &FingerprintConfig{
+		UserID:       userID,
+		Audio:        fg.generateAudioConfig(r),
+		Network:      fg.generateNetworkConfig(r),
+		Canvas:       fg.generateCanvasConfig(r),
+		Fonts:        fg.generateFontsConfig(r),
+		Plugins:      fg.generatePluginsConfig(r),
+		Battery:      fg.generateBatteryConfig(r),
+		MediaDevices: fg.generateMediaDevicesConfig(r),
+		TLSConfig:    fg.generateTLSConfig(r),
+		HTTP2Config:  fg.generateHTTP2Config(r),
+	}
+	c.Browser.UserAgent = canonicalUserAgent(osf, "120")
+	c.Browser.Language = "zh-CN"
+	c.Browser.CookieEnabled = true
+	c.Normalize()
+	return c
 }

@@ -81,55 +81,56 @@ func (ufm *UserFingerprintManager) GetOrCreateUserFingerprint(userID string, ini
 	
 	ufm.mutex.RUnlock()
 	
-	// 尝试从文件加载
+	// 从文件加载；旧格式或不自洽的指纹在这里规范化并回写。损坏的文件直接报错，绝不覆盖
 	configPath := ufm.getUserConfigPath(userID)
 	if _, err := os.Stat(configPath); err == nil {
-		config, err := ufm.loadConfigFromFile(configPath)
-		if err == nil {
-			ufm.mutex.Lock()
-			ufm.cache[userID] = config
-			ufm.mutex.Unlock()
-			return config, nil
+		config, err := LoadFingerprintConfigFile(configPath)
+		if err != nil {
+			return nil, fmt.Errorf("load fingerprint %s: %w", userID, err)
 		}
+		if config.Normalize() {
+			if err := ufm.saveConfigToFile(config, configPath); err != nil {
+				return nil, fmt.Errorf("save normalized fingerprint %s: %w", userID, err)
+			}
+		}
+		ufm.mutex.Lock()
+		ufm.cache[userID] = config
+		ufm.mutex.Unlock()
+		return config, nil
 	}
-	
-	// 生成新的指纹配置
-	config := ufm.generator.GenerateFingerprint(userID)
-	
-	// 应用初始化参数（仅在新建时生效）
+
+	// 新账号：系统由绑定的 UA 决定，未提供 UA 时为 Windows
+	osFamily := OSWindows
+	if initParams != nil && initParams.UserAgent != "" {
+		osFamily = osFromUserAgent(initParams.UserAgent)
+	}
+	config := generateFingerprintFor(userID, osFamily)
 	if initParams != nil {
 		if initParams.Width > 0 {
 			config.Screen.Width = initParams.Width
-			config.Screen.AvailWidth = initParams.Width
 		}
 		if initParams.Height > 0 {
 			config.Screen.Height = initParams.Height
-			config.Screen.AvailHeight = initParams.Height - 72 // 留出任务栏空间
 		}
 		if initParams.UserAgent != "" {
 			config.Browser.UserAgent = initParams.UserAgent
 		}
 		if initParams.Language != "" {
 			config.Browser.Language = initParams.Language
+			config.Browser.Languages = nil
+			if initParams.Timezone == "" {
+				config.Timezone.Timezone = "" // 只设了语言：时区由 Normalize 按语言推导
+			}
 		}
 		if len(initParams.Languages) > 0 {
 			config.Browser.Languages = initParams.Languages
 		}
-		// 时区设置
 		if initParams.Timezone != "" {
 			config.Timezone.Timezone = initParams.Timezone
 		}
-		if initParams.TimezoneOffset != 0 {
-			config.Timezone.Offset = initParams.TimezoneOffset
-		}
-		// 如果设置了语言但没设置时区，自动匹配时区
-		if initParams.Language != "" && initParams.Timezone == "" && initParams.TimezoneOffset == 0 {
-			tz, offset := getTimezoneForLanguage(initParams.Language)
-			config.Timezone.Timezone = tz
-			config.Timezone.Offset = offset
-		}
+		config.Normalize()
 	}
-	
+
 	// 保存到文件
 	if err := ufm.saveConfigToFile(config, configPath); err != nil {
 		return nil, fmt.Errorf("failed to save config: %v", err)

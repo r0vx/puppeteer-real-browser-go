@@ -79,8 +79,11 @@ type ConnectOptions struct {
 
 	// Timezone settings - used when creating new fingerprint config
 	// 时区设置 - 创建新指纹配置时使用
-	Timezone       string `json:"timezone"`       // 时区名称，如 "Asia/Shanghai"
-	TimezoneOffset int    `json:"timezoneOffset"` // 时区偏移（分钟），如 480 表示 UTC+8
+	Timezone string `json:"timezone"` // 时区名称，如 "Asia/Shanghai"
+	// TimezoneOffset 时区偏移（分钟），如 480 表示 UTC+8。
+	//
+	// Deprecated: 不再生效，偏移量由浏览器按 Timezone 计算。
+	TimezoneOffset int `json:"timezoneOffset"`
 
 	// Cache settings - optimize page load performance
 	// 缓存设置 - 优化页面加载性能
