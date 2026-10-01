@@ -185,6 +185,39 @@ func applyIdentity(call cdpCaller, id *Identity, kind targetKind) error {
 	return nil
 }
 
+// viewportOverride 改视口用的 Emulation.setDeviceMetricsOverride 参数：带上身份的屏幕尺寸与 DPR，
+// 否则覆盖会把屏幕退回无界面默认值；身份不调整几何时不覆盖 DPR
+func viewportOverride(id *Identity, width, height int) map[string]any {
+	p := map[string]any{"width": width, "height": height, "deviceScaleFactor": 0, "mobile": false}
+	if id != nil && id.Screen.Width > 0 {
+		p["deviceScaleFactor"], p["screenWidth"], p["screenHeight"] = id.Screen.DPR, id.Screen.Width, id.Screen.Height
+	}
+	return p
+}
+
+// viewportWindowBounds 改视口后的窗口外框：比视口多出浏览器 UI，和真实的非最大化窗口一样
+func viewportWindowBounds(width, height int) map[string]any {
+	return map[string]any{"width": width, "height": height + browserUIHeight}
+}
+
+// setTargetWindowBounds 用浏览器级会话调整目标所在窗口的位置与外框
+func setTargetWindowBounds(browser cdpCaller, targetID string, bounds map[string]any) error {
+	raw, err := browser("Browser.getWindowForTarget", map[string]any{"targetId": targetID})
+	if err != nil {
+		return fmt.Errorf("Browser.getWindowForTarget: %w", err)
+	}
+	var w struct {
+		WindowID int `json:"windowId"`
+	}
+	if err := json.Unmarshal(raw, &w); err != nil {
+		return fmt.Errorf("decode window: %w", err)
+	}
+	if _, err := browser("Browser.setWindowBounds", map[string]any{"windowId": w.WindowID, "bounds": bounds}); err != nil {
+		return fmt.Errorf("Browser.setWindowBounds: %w", err)
+	}
+	return nil
+}
+
 // windowBounds Browser.setWindowBounds 的参数：最大化窗口的位置与外框尺寸
 func windowBounds(id *Identity) map[string]any {
 	return map[string]any{"left": 0, "top": id.Screen.AvailTop, "width": id.Screen.OuterWidth, "height": id.Screen.OuterHeight}

@@ -445,11 +445,13 @@ func (ccc *CustomCDPConnector) Connect(ctx context.Context, chrome *ChromeProces
 	}
 
 	page := &CustomCDPPage{
-		client: &CustomCDPClient{conn: conn, sessionID: session},
-		chrome: chrome,
-		opts:   opts,
-		ctx:    ctx,
-		cursor: NewGhostCursor(),
+		client:   &CustomCDPClient{conn: conn, sessionID: session},
+		chrome:   chrome,
+		opts:     opts,
+		ctx:      ctx,
+		cursor:   NewGhostCursor(),
+		identity: id,
+		targetID: mainTarget,
 	}
 	if err := page.initialize(); err != nil {
 		conn.close()
@@ -465,6 +467,9 @@ type CustomCDPPage struct {
 	opts   *ConnectOptions
 	ctx    context.Context
 	cursor *GhostCursor // 持久化拟人光标，避免每次点击瞬移
+
+	identity *Identity // 下发给本页的身份（SetViewport 要保留它的屏幕与 DPR）
+	targetID string    // 本页的 targetId（调整窗口用）
 
 	// 请求拦截状态
 	fetchMu         sync.Mutex
@@ -835,15 +840,14 @@ func (p *CustomCDPPage) Screenshot() ([]byte, error) {
 
 // SetViewport sets viewport
 func (p *CustomCDPPage) SetViewport(width, height int) error {
-	params := map[string]interface{}{
-		"width":  width,
-		"height": height,
-		// 两者为必填参数；deviceScaleFactor=0 表示不覆盖 DPR，避免改变 devicePixelRatio 指纹
-		"deviceScaleFactor": 0,
-		"mobile":            false,
+	if _, err := p.client.sendCommand("Emulation.setDeviceMetricsOverride", viewportOverride(p.identity, width, height)); err != nil {
+		return err
 	}
-	_, err := p.client.sendCommand("Emulation.setDeviceMetricsOverride", params)
-	return err
+	if p.identity == nil || p.identity.Screen.Width == 0 || p.targetID == "" {
+		return nil // 身份不调整几何（有界面且不设指纹）时不动用户可见的窗口
+	}
+	browser := func(m string, params any) (json.RawMessage, error) { return p.client.conn.call("", m, params) }
+	return setTargetWindowBounds(browser, p.targetID, viewportWindowBounds(width, height))
 }
 
 // GetTitle gets page title

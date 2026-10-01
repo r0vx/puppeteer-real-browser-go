@@ -308,3 +308,42 @@ func TestCDPPageIdentity(t *testing.T) {
 		t.Error("chromedp path accepted a corrupt fingerprint file")
 	}
 }
+
+// TestSetViewportKeepsIdentity 改视口后屏幕与 DPR 仍是身份的值（不能退回无界面的 800×600），窗口外框随视口调整
+func TestSetViewportKeepsIdentity(t *testing.T) {
+	ss := newSurfaceServers(t)
+	const macUA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+	for _, custom := range []bool{false, true} {
+		for _, fp := range []string{"", "viewport-mac"} {
+			t.Run(fmt.Sprintf("UseCustomCDP=%v/fingerprint=%q", custom, fp), func(t *testing.T) {
+				opts := &ConnectOptions{Headless: true, UseCustomCDP: custom, FingerprintDir: t.TempDir()}
+				if fp != "" {
+					opts.FingerprintUserID, opts.UserAgent = fp, macUA
+				}
+				inst, err := Connect(t.Context(), opts)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer inst.Close()
+				p := inst.Page()
+				if err := p.Navigate(ss.main.URL + "/plain"); err != nil {
+					t.Fatal(err)
+				}
+				const js = `[screen.width, screen.height, devicePixelRatio, matchMedia('(resolution: ' + devicePixelRatio + 'dppx)').matches].join()`
+				before, _ := p.Evaluate(js)
+				if err := p.SetViewport(1200, 700); err != nil {
+					t.Fatal(err)
+				}
+				if err := p.Navigate(ss.main.URL + "/plain?after"); err != nil {
+					t.Fatal(err)
+				}
+				if after, _ := p.Evaluate(js); after != before {
+					t.Errorf("screen after SetViewport = %v, before %v", after, before)
+				}
+				if geo, _ := p.Evaluate(`[innerWidth, innerHeight, outerWidth - innerWidth, outerHeight - innerHeight].join()`); geo != fmt.Sprintf("1200,700,0,%d", browserUIHeight) {
+					t.Errorf("viewport / window after SetViewport = %v, want 1200,700,0,%d", geo, browserUIHeight)
+				}
+			})
+		}
+	}
+}

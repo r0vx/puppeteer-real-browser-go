@@ -63,6 +63,7 @@ type CDPPage struct {
 	allocCancel       context.CancelFunc
 	chrome            *ChromeProcess
 	opts              *ConnectOptions
+	identity          *Identity // 下发给本页的身份（SetViewport 要保留它的屏幕与 DPR）
 	initialized       bool
 	requestHandler    RequestHandler
 	interceptEnabled  bool
@@ -121,8 +122,9 @@ func (p *CDPPage) initialize() error {
 			if err := applyIdentity(call, id, kindPage); err != nil {
 				return err
 			}
+			p.identity = id
 			if id.Screen.Width > 0 {
-				return setChromedpWindowBounds(ctx, id)
+				return setChromedpWindowBounds(ctx, windowBounds(id))
 			}
 			return nil
 		}),
@@ -362,7 +364,15 @@ func (p *CDPPage) Screenshot() ([]byte, error) {
 
 // SetViewport sets the viewport size
 func (p *CDPPage) SetViewport(width, height int) error {
-	return chromedp.Run(p.ctx, chromedp.EmulateViewport(int64(width), int64(height)))
+	return chromedp.Run(p.ctx, chromedp.ActionFunc(func(ctx context.Context) error {
+		if err := cdp.Execute(ctx, "Emulation.setDeviceMetricsOverride", viewportOverride(p.identity, width, height), nil); err != nil {
+			return fmt.Errorf("Emulation.setDeviceMetricsOverride: %w", err)
+		}
+		if p.identity == nil || p.identity.Screen.Width == 0 {
+			return nil // 身份不调整几何（有界面且不设指纹）时不动用户可见的窗口
+		}
+		return setChromedpWindowBounds(ctx, viewportWindowBounds(width, height))
+	}))
 }
 
 // GetTitle returns the page title
@@ -939,18 +949,14 @@ func escapeSelector(selector string) string {
 	return escaped
 }
 
-// setChromedpWindowBounds chromedp 路径：把主页面所在窗口设为身份的最大化窗口
-func setChromedpWindowBounds(ctx context.Context, id *Identity) error {
+// setChromedpWindowBounds chromedp 路径：调整本页所在窗口的位置与外框
+func setChromedpWindowBounds(ctx context.Context, bounds map[string]any) error {
 	c := chromedp.FromContext(ctx)
 	bctx := cdp.WithExecutor(ctx, c.Browser)
-	var w struct {
-		WindowID int64 `json:"windowId"`
+	browser := func(m string, params any) (json.RawMessage, error) {
+		var raw json.RawMessage
+		err := cdp.Execute(bctx, m, params, &raw)
+		return raw, err
 	}
-	if err := cdp.Execute(bctx, "Browser.getWindowForTarget", map[string]any{"targetId": c.Target.TargetID}, &w); err != nil {
-		return fmt.Errorf("Browser.getWindowForTarget: %w", err)
-	}
-	if err := cdp.Execute(bctx, "Browser.setWindowBounds", map[string]any{"windowId": w.WindowID, "bounds": windowBounds(id)}, nil); err != nil {
-		return fmt.Errorf("Browser.setWindowBounds: %w", err)
-	}
-	return nil
+	return setTargetWindowBounds(browser, string(c.Target.TargetID), bounds)
 }

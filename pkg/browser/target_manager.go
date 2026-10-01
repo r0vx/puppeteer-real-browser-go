@@ -65,7 +65,7 @@ func (tm *targetManager) onAttached(_ string, params json.RawMessage) {
 	if handled {
 		err = applyIdentity(call, tm.identity, kind)
 		if err == nil && kind == kindPage && tm.identity.Screen.Width > 0 {
-			err = tm.setWindowBounds(ev.TargetInfo.TargetID)
+			err = setTargetWindowBounds(tm.browserCall, ev.TargetInfo.TargetID, windowBounds(tm.identity))
 		}
 		if _, e := call("Target.setAutoAttach", autoAttachParams); e != nil && err == nil {
 			err = fmt.Errorf("Target.setAutoAttach: %w", e)
@@ -87,20 +87,7 @@ func (tm *targetManager) onAttached(_ string, params json.RawMessage) {
 	}
 }
 
-// setWindowBounds 把页面所在窗口设为身份的最大化窗口（决定 outerWidth / outerHeight / screenX / screenY）
-func (tm *targetManager) setWindowBounds(targetID string) error {
-	raw, err := tm.conn.call("", "Browser.getWindowForTarget", map[string]any{"targetId": targetID})
-	if err != nil {
-		return fmt.Errorf("Browser.getWindowForTarget: %w", err)
-	}
-	var w struct {
-		WindowID int `json:"windowId"`
-	}
-	if err := json.Unmarshal(raw, &w); err != nil {
-		return fmt.Errorf("decode window: %w", err)
-	}
-	if _, err := tm.conn.call("", "Browser.setWindowBounds", map[string]any{"windowId": w.WindowID, "bounds": windowBounds(tm.identity)}); err != nil {
-		return fmt.Errorf("Browser.setWindowBounds: %w", err)
-	}
-	return nil
+// browserCall 在浏览器级会话上发命令
+func (tm *targetManager) browserCall(method string, params any) (json.RawMessage, error) {
+	return tm.conn.call("", method, params)
 }
