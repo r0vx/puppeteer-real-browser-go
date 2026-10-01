@@ -347,3 +347,33 @@ func TestSetViewportKeepsIdentity(t *testing.T) {
 		}
 	}
 }
+
+// TestNewPageOnCustomCDPInstance CustomCDP 实例上 CreateBrowserContext().NewPage()：主页面停在非安全上下文时也能开，
+// 新页拿到的是账号身份（由 target manager 下发），不会被 chromedp 路径用默认身份覆盖
+func TestNewPageOnCustomCDPInstance(t *testing.T) {
+	ss := newSurfaceServers(t)
+	inst, err := Connect(t.Context(), &ConnectOptions{Headless: true, UseCustomCDP: true, FingerprintUserID: "newpage-mac", FingerprintDir: t.TempDir(),
+		UserAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer inst.Close()
+	if err := inst.Page().Navigate("about:blank"); err != nil {
+		t.Fatal(err)
+	}
+	bc, err := inst.CreateBrowserContext(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	np, err := bc.NewPage()
+	if err != nil {
+		t.Fatalf("NewPage: %v", err)
+	}
+	defer np.Close()
+	if err := np.Navigate(ss.main.URL + "/plain"); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := np.Evaluate(`[navigator.platform, navigator.userAgentData.platform, navigator.userAgent.includes('Macintosh')].join()`); err != nil || got != "MacIntel,macOS,true" {
+		t.Errorf("new page identity = %v (%v), want MacIntel,macOS,true", got, err)
+	}
+}

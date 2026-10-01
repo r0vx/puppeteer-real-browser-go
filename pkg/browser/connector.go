@@ -112,6 +112,14 @@ func (p *CDPPage) initialize() error {
 
 		// 身份：由真实浏览器信息派生并下发到主页面（chromedp 路径不接管 iframe / Worker / 弹窗，见子项目 D）
 		chromedp.ActionFunc(func(ctx context.Context) error {
+			p.chrome.hostMu.Lock()
+			managed := p.chrome.managedIdentity
+			p.chrome.hostMu.Unlock()
+			if managed != nil {
+				// CustomCDP 实例上开的页面：target manager 已在它运行前下发了账号身份，这里再下发会用默认身份覆盖
+				p.identity = managed
+				return nil
+			}
 			id, err := identityForOptions(p.opts, host)
 			if err != nil {
 				return err

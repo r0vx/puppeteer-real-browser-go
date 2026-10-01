@@ -443,6 +443,10 @@ func (ccc *CustomCDPConnector) Connect(ctx context.Context, chrome *ChromeProces
 		conn.close()
 		return nil, err
 	}
+	// 之后在本进程上开的 chromedp 页面（BrowserContext.NewPage）复用这里的信息与身份，不再自己读取和下发
+	chrome.hostMu.Lock()
+	chrome.host, chrome.managedIdentity = &host, id
+	chrome.hostMu.Unlock()
 
 	page := &CustomCDPPage{
 		client:   &CustomCDPClient{conn: conn, sessionID: session},
