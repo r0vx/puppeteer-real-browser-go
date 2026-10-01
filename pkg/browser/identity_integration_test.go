@@ -251,3 +251,47 @@ func TestConnectRejectsCorruptFingerprint(t *testing.T) {
 		t.Fatal("Connect succeeded with a corrupt fingerprint file")
 	}
 }
+
+// TestCDPPageIdentity chromedp 路径：主页面的请求头与 JS 是账号身份，没有无界面痕迹；损坏的指纹文件同样报错
+func TestCDPPageIdentity(t *testing.T) {
+	ss := newSurfaceServers(t)
+	inst, err := Connect(t.Context(), &ConnectOptions{
+		Headless: true, FingerprintUserID: "cdppage-win", FingerprintDir: t.TempDir(), Language: "ja-JP",
+		UserAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer inst.Close()
+	p := inst.Page()
+	if err := p.Navigate(ss.main.URL + "/plain"); err != nil {
+		t.Fatal(err)
+	}
+	for js, want := range map[string]any{
+		`navigator.platform`:                            "Win32",
+		`navigator.userAgentData.platform`:              "Windows",
+		`navigator.languages.join()`:                    "ja-JP,ja",
+		`navigator.userAgent.includes('Headless')`:      false,
+		`screen.width === 800 && screen.height === 600`: false,
+		`(() => { const g = document.createElement('canvas').getContext('webgl'); g.getExtension('WEBGL_debug_renderer_info'); return g.getParameter(37446).includes('SwiftShader'); })()`: false,
+	} {
+		if got, err := p.Evaluate(js); err != nil || got != want {
+			t.Errorf("%s = %v (%v), want %v", js, got, err, want)
+		}
+	}
+	ss.mu.Lock()
+	ua := ss.headers["/plain"].Get("User-Agent")
+	ss.mu.Unlock()
+	if got, _ := p.Evaluate(`navigator.userAgent`); got != ua {
+		t.Errorf("header UA %q != JS UA %v", ua, got)
+	}
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "corrupt.json"), []byte("{"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if bad, err := Connect(t.Context(), &ConnectOptions{Headless: true, FingerprintUserID: "corrupt", FingerprintDir: dir}); err == nil {
+		bad.Close()
+		t.Error("chromedp path accepted a corrupt fingerprint file")
+	}
+}

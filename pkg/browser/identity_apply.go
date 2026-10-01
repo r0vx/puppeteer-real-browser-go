@@ -31,7 +31,8 @@ func targetKindOf(t string) (targetKind, bool) {
 	return 0, false
 }
 
-// hostInfoJS 在未覆盖身份的页面上读取真实浏览器的值（初始标签页 chrome://newtab 或 about:blank 都是安全上下文，可读 userAgentData）
+// hostInfoJS 在未覆盖身份的页面上读取真实浏览器的值。必须在安全上下文里执行才有 userAgentData：
+// 启动时的标签页 chrome://newtab 可以；经 CDP 新建的 about:blank 是不透明源，不行
 const hostInfoJS = `(async () => {
   const d = navigator.userAgentData;
   const h = await d.getHighEntropyValues(['architecture', 'bitness', 'model', 'platformVersion', 'fullVersionList', 'wow64', 'formFactors']);
@@ -207,4 +208,29 @@ func identityForOptions(opts *ConnectOptions, host hostInfo) (*Identity, error) 
 		return nil, err
 	}
 	return identityFromConfig(cfg, host)
+}
+
+// browserHostInfo 返回 Chrome 进程的真实浏览器信息，同一进程只读一次：经浏览器级连接在启动时的标签页上读取。
+// chromedp 路径用它，因为 chromedp 自己开的 about:blank 不是安全上下文，读不到 userAgentData
+func browserHostInfo(chrome *ChromeProcess) (hostInfo, error) {
+	chrome.hostMu.Lock()
+	defer chrome.hostMu.Unlock()
+	if chrome.host != nil {
+		return *chrome.host, nil
+	}
+	conn, err := dialBrowser(chrome.Port)
+	if err != nil {
+		return hostInfo{}, err
+	}
+	defer conn.close()
+	target, err := initialPageTarget(conn)
+	if err != nil {
+		return hostInfo{}, err
+	}
+	host, err := readHostInfo(conn, target)
+	if err != nil {
+		return hostInfo{}, err
+	}
+	chrome.host = &host
+	return host, nil
 }

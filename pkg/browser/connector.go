@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/cdproto/dom"
-	"github.com/chromedp/cdproto/emulation"
 	"github.com/chromedp/cdproto/fetch"
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/cdproto/page"
@@ -82,7 +82,13 @@ func (p *CDPPage) initialize() error {
 	// CRITICAL: Completely avoid Runtime.Enable to prevent Cloudflare detection
 	// This is the core issue that was causing detection
 
-	err := chromedp.Run(p.ctx,
+	// 必须在 chromedp 建出自己的标签页之前读取：此时启动标签页是唯一的页面（见 browserHostInfo）
+	host, err := browserHostInfo(p.chrome)
+	if err != nil {
+		return err
+	}
+
+	err = chromedp.Run(p.ctx,
 		// Enable ONLY essential domains (NOT Runtime domain!)
 		chromedp.ActionFunc(func(ctx context.Context) error {
 			// Page domain for navigation
@@ -103,60 +109,22 @@ func (p *CDPPage) initialize() error {
 		// Set viewport if specified
 		p.setupViewport(),
 
-		// Set up additional stealth configurations
-		p.setupAdditionalStealth(),
-
-		// CRITICAL: Inject stealth script and set UserAgent
+		// 身份：由真实浏览器信息派生并下发到主页面（chromedp 路径不接管 iframe / Worker / 弹窗，见子项目 D）
 		chromedp.ActionFunc(func(ctx context.Context) error {
-			var script string
-			var userAgent string
-			var platform string
-
-			// 检查是否指定了用户ID
-			if p.opts != nil && p.opts.FingerprintUserID != "" {
-				// 使用 UserFingerprintManager 获取或生成指纹
-				fingerprintDir := p.opts.FingerprintDir
-				if fingerprintDir == "" {
-					fingerprintDir = "./fingerprints"
-				}
-				manager, err := NewUserFingerprintManager(fingerprintDir)
-				if err == nil {
-					// 提取初始化参数（Width、Height、UserAgent）
-					initParams := GetInitParamsFromOptions(p.opts)
-					config, err := manager.GetOrCreateUserFingerprint(p.opts.FingerprintUserID, initParams)
-					if err == nil {
-						// 使用缓存的脚本（基于 userID）
-						script = GetCachedStealthScriptWithConfig(config)
-						// 获取 UserAgent 和 Platform
-						userAgent = config.Browser.UserAgent
-						platform = config.Browser.Platform
-					}
-				}
-				// 如果获取失败，使用缓存的默认脚本
-				if script == "" {
-					script = GetCachedSimpleStealthScript()
-				}
-			} else {
-				// 使用缓存的简单 stealth 脚本
-				script = GetCachedSimpleStealthScript()
-				// 如果直接设置了 UserAgent（不使用 FingerprintUserID）
-				if p.opts != nil && p.opts.UserAgent != "" {
-					userAgent = p.opts.UserAgent
-				}
+			id, err := identityForOptions(p.opts, host)
+			if err != nil {
+				return err
 			}
-
-			// 设置 HTTP 请求头的 UserAgent（关键！）
-			if userAgent != "" {
-				if err := emulation.SetUserAgentOverride(userAgent).
-					WithPlatform(platform).
-					Do(ctx); err != nil {
-					// 不要失败，只是警告
-					fmt.Printf("⚠️ 设置 UserAgent 失败: %v\n", err)
-				}
+			call := func(method string, params any) (json.RawMessage, error) {
+				return nil, cdp.Execute(ctx, method, params, nil)
 			}
-
-			_, err := page.AddScriptToEvaluateOnNewDocument(script).Do(ctx)
-			return err
+			if err := applyIdentity(call, id, kindPage); err != nil {
+				return err
+			}
+			if id.Screen.Width > 0 {
+				return setChromedpWindowBounds(ctx, id)
+			}
+			return nil
 		}),
 	)
 
@@ -600,17 +568,6 @@ func (p *CDPPage) setupViewport() chromedp.Action {
 	})
 }
 
-// setupAdditionalStealth sets up additional stealth configurations
-func (p *CDPPage) setupAdditionalStealth() chromedp.Action {
-	return chromedp.ActionFunc(func(ctx context.Context) error {
-		// Set realistic viewport if not already set
-		if p.opts.ConnectOption == nil || p.opts.ConnectOption["defaultViewport"] == nil {
-			return chromedp.EmulateViewport(1920, 1080).Do(ctx)
-		}
-		return nil
-	})
-}
-
 // SetRequestInterception enables or disables request interception
 func (p *CDPPage) SetRequestInterception(enabled bool) error {
 	p.requestListenerMu.Lock()
@@ -980,4 +937,20 @@ func escapeSelector(selector string) string {
 	escaped := strings.ReplaceAll(selector, `\`, `\\`)
 	escaped = strings.ReplaceAll(escaped, `'`, `\'`)
 	return escaped
+}
+
+// setChromedpWindowBounds chromedp 路径：把主页面所在窗口设为身份的最大化窗口
+func setChromedpWindowBounds(ctx context.Context, id *Identity) error {
+	c := chromedp.FromContext(ctx)
+	bctx := cdp.WithExecutor(ctx, c.Browser)
+	var w struct {
+		WindowID int64 `json:"windowId"`
+	}
+	if err := cdp.Execute(bctx, "Browser.getWindowForTarget", map[string]any{"targetId": c.Target.TargetID}, &w); err != nil {
+		return fmt.Errorf("Browser.getWindowForTarget: %w", err)
+	}
+	if err := cdp.Execute(bctx, "Browser.setWindowBounds", map[string]any{"windowId": w.WindowID, "bounds": windowBounds(id)}, nil); err != nil {
+		return fmt.Errorf("Browser.setWindowBounds: %w", err)
+	}
+	return nil
 }
