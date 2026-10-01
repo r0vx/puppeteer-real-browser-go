@@ -1,6 +1,6 @@
 # 账号身份自洽（反检测子项目 1）设计
 
-日期：2026-09-30　状态：待审　分支：`feat/coherent-identity`
+日期：2026-09-30　状态：已通过（2026-09-30）　分支：`feat/coherent-identity`
 
 ## 1. 背景与目标
 
@@ -137,8 +137,12 @@
 
 ## 8. 风险与待确认
 
-- **待确认**：UA 版本跟随真实浏览器（第 4.1 节，推荐）。
-- **待确认**：已保存的 Linux UA 账号按 Windows 处理（本地 42 份指纹中有 21 份是 Linux）。
+- **已确认（2026-09-30）**：UA 版本跟随真实浏览器（第 4.1 节）。
+- **已确认（2026-09-30）**：已保存的 Linux UA 账号按 Windows 处理（本地 42 份指纹中有 21 份是 Linux）。理由：
+  - Windows 字体能在服务器上补齐，Mac 字体不能；
+  - 服务器 CPU 是 x86-64，与 Windows 的 `x86` 一致，而 Mac 主流是 `arm`；
+  - 这些账号现有的屏幕和 DPR 1 本来就符合 Windows 用户；
+  - 目标站的桌面用户以 Windows 为主。
 - **已知残余风险**：
   - 软件渲染（SwiftShader）出来的 canvas / WebGL 图像特征和真实显卡不同；
   - 语音列表 `speechSynthesis.getVoices` 与 Windows / Mac 不符；
