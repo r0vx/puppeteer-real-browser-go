@@ -25,6 +25,16 @@ func NewChromeLauncher() *ChromeLauncher {
 
 // Launch starts a Chrome process with the given options
 func (cl *ChromeLauncher) Launch(ctx context.Context, opts *ConnectOptions) (*ChromeProcess, error) {
+	// 无界面 + 账号指纹：启动时就让浏览器原生报告账号屏幕（见 headlessScreenFlags）；指纹文件损坏在这里就报错
+	var screenFlags []string
+	if opts.FingerprintUserID != "" && len(config.GetHeadlessFlags(opts.Headless)) > 0 {
+		cfg, err := fingerprintForOptions(opts)
+		if err != nil {
+			return nil, err
+		}
+		screenFlags = headlessScreenFlags(configGeometry(cfg))
+	}
+
 	// Setup Xvfb on Linux if headless is false and Xvfb is not disabled
 	if err := cl.setupXvfb(opts); err != nil {
 		// Just print warning, don't fail
@@ -53,7 +63,7 @@ func (cl *ChromeLauncher) Launch(ctx context.Context, opts *ConnectOptions) (*Ch
 	}
 
 	// Build Chrome flags
-	flags := cl.buildChromeFlags(opts, port, userDataDir)
+	flags := append(cl.buildChromeFlags(opts, port, userDataDir), screenFlags...)
 
 	// DEBUG: 打印实际的Chrome启动参数 (可选)
 	// fmt.Printf("🔧 Chrome启动路径: %s\n", chromePath)

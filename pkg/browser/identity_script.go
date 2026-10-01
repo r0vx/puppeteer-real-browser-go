@@ -197,10 +197,9 @@ if (C.seed && G.OffscreenCanvas && G.OffscreenCanvasRenderingContext2D) {
 const jsWindowPart = `
 if (C.screen && G.Screen) {
   const S = C.screen;
-  const fixed = {availWidth: S.availWidth, availHeight: S.availHeight, availTop: S.availTop, availLeft: 0};
-  if (G.screen.width !== S.width) fixed.width = S.width;
-  if (G.screen.height !== S.height) fixed.height = S.height;
-  for (const [k, v] of Object.entries(fixed)) patchGetter(Screen.prototype, k, () => v);
+  // 只在原生值不符时改写（无界面 + 指纹时启动参数已让原生值正确，见 headlessScreenFlags）
+  const want = {width: S.width, height: S.height, availWidth: S.availWidth, availHeight: S.availHeight, availTop: S.availTop, availLeft: 0};
+  for (const [k, v] of Object.entries(want)) if (G.screen[k] !== v) patchGetter(Screen.prototype, k, () => v);
   if (G.devicePixelRatio !== S.dpr) patchGetter(G, 'devicePixelRatio', () => S.dpr);
 }
 if (G.MouseEvent && G === G.top) {

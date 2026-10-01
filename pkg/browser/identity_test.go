@@ -172,3 +172,21 @@ func TestHostIdentity(t *testing.T) {
 		t.Errorf("real GPU must not be masked, got %+v", hid.GPU)
 	}
 }
+
+// TestHeadlessScreenFlags 无界面屏幕参数：尺寸与工作区内缩用物理像素，DPR 单独用 --force-device-scale-factor 给出
+func TestHeadlessScreenFlags(t *testing.T) {
+	cases := []struct {
+		g    screenGeometry
+		want []string
+	}{
+		{geometryFor(OSWindows, screenSpec{Width: 1536, Height: 864, DPR: 1.25}, "15.0.0"),
+			[]string{"--screen-info={0,0 1920x1080 workAreaTop=0 workAreaBottom=60}", "--force-device-scale-factor=1.25"}},
+		{geometryFor(OSMac, screenSpec{Width: 1512, Height: 982, DPR: 2, Notch: true}, "15.5.0"),
+			[]string{"--screen-info={0,0 3024x1964 workAreaTop=76 workAreaBottom=0}", "--force-device-scale-factor=2"}},
+	}
+	for _, tc := range cases {
+		if got := headlessScreenFlags(tc.g); !slices.Equal(got, tc.want) {
+			t.Errorf("headlessScreenFlags(%+v) = %q, want %q", tc.g, got, tc.want)
+		}
+	}
+}

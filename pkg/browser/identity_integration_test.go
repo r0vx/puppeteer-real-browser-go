@@ -18,7 +18,7 @@ const surfaceInfoJS = `() => ({ua: navigator.userAgent, appVersion: navigator.ap
   hc: navigator.hardwareConcurrency, tz: Intl.DateTimeFormat().resolvedOptions().timeZone, date: new Date(0).toString(),
   locale: Intl.DateTimeFormat().resolvedOptions().locale, uadPlatform: navigator.userAgentData.platform,
   brands: navigator.userAgentData.brands.map(b => b.brand).join(),
-  screen: self.document ? [screen.width, screen.height, screen.availHeight, devicePixelRatio].join() : null,
+  screen: self.document ? [screen.width, screen.height, screen.availHeight, devicePixelRatio, matchMedia('(resolution: ' + devicePixelRatio + 'dppx)').matches].join() : null,
   webgl: (() => { try { const c = self.document ? document.createElement('canvas') : new OffscreenCanvas(1, 1);
     const g = c.getContext('webgl'); g.getExtension('WEBGL_debug_renderer_info'); return g.getParameter(37446); } catch (e) { return 'n/a'; } })()})`
 
@@ -155,6 +155,10 @@ func TestIdentityAcrossSurfaces(t *testing.T) {
 			}
 			if !strings.Contains(fmt.Sprint(main["brands"]), "Google Chrome") {
 				t.Errorf("brands = %v", main["brands"])
+			}
+			// devicePixelRatio 与 CSS 媒体查询的分辨率一致（JS 单改 devicePixelRatio 会露馅）
+			if !strings.HasSuffix(fmt.Sprint(main["screen"]), ",true") {
+				t.Errorf("main devicePixelRatio disagrees with matchMedia resolution: %v", main["screen"])
 			}
 			if strings.HasPrefix(fmt.Sprint(main["screen"]), "800,600") {
 				t.Errorf("headless default screen leaked: %v", main["screen"])

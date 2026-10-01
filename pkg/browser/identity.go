@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
+	"math"
 	"regexp"
 	"strings"
 	_ "time/tzdata" // 时区校验不依赖服务器是否安装 tzdata
@@ -159,6 +160,25 @@ func geometryFor(os OSFamily, s screenSpec, platformVersion string) screenGeomet
 	return g
 }
 
+// configGeometry 账号指纹对应的屏幕与窗口几何（身份与无界面启动参数共用，保证两边一致）
+func configGeometry(cfg *FingerprintConfig) screenGeometry {
+	os := osFromUserAgent(cfg.Browser.UserAgent)
+	spec, _ := screenSpecFor(os, cfg.Screen.Width, cfg.Screen.Height, cfg.Screen.DevicePixelRatio)
+	return geometryFor(os, spec, cfg.Browser.PlatformVersion)
+}
+
+// headlessScreenFlags 无界面模式下让浏览器原生报告身份的屏幕：所有 frame（含跨站 iframe）的 screen、
+// devicePixelRatio 与 matchMedia 都一致，不必靠注入脚本。--screen-info 的尺寸与工作区内缩用物理像素，
+// 且只认整数 DPR，所以 DPR 单独用 --force-device-scale-factor 给出（Chrome 154 实测）
+func headlessScreenFlags(g screenGeometry) []string {
+	px := func(v int) int { return int(math.Round(float64(v) * g.DPR)) }
+	bottom := g.Height - g.AvailTop - g.AvailHeight
+	return []string{
+		fmt.Sprintf("--screen-info={0,0 %dx%d workAreaTop=%d workAreaBottom=%d}", px(g.Width), px(g.Height), px(g.AvailTop), px(bottom)),
+		fmt.Sprintf("--force-device-scale-factor=%g", g.DPR),
+	}
+}
+
 // Identity 一个账号对外呈现的完整浏览器身份，由 CDP 下发到所有目标
 type Identity struct {
 	OS                  OSFamily
@@ -214,7 +234,6 @@ func identityFromConfig(cfg *FingerprintConfig, host hostInfo) (*Identity, error
 	if os == OSMac {
 		meta.Platform, meta.Architecture = "macOS", "arm"
 	}
-	spec, _ := screenSpecFor(os, cfg.Screen.Width, cfg.Screen.Height, cfg.Screen.DevicePixelRatio)
 	return &Identity{
 		OS:                  os,
 		UserAgent:           canonicalUserAgent(os, host.majorVersion()),
@@ -224,7 +243,7 @@ func identityFromConfig(cfg *FingerprintConfig, host hostInfo) (*Identity, error
 		Timezone:            cfg.Timezone.Timezone,
 		HardwareConcurrency: cfg.Browser.HardwareConcurrency,
 		Metadata:            meta,
-		Screen:              geometryFor(os, spec, cfg.Browser.PlatformVersion),
+		Screen:              configGeometry(cfg),
 		GPU:                 &gpu,
 		NoiseSeed:           noiseSeed(cfg.UserID),
 		ScriptKey:           newScriptKey(),

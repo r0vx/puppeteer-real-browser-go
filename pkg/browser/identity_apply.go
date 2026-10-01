@@ -195,6 +195,15 @@ func identityForOptions(opts *ConnectOptions, host hostInfo) (*Identity, error) 
 	if opts == nil || opts.FingerprintUserID == "" {
 		return hostIdentity(host), nil
 	}
+	cfg, err := fingerprintForOptions(opts)
+	if err != nil {
+		return nil, err
+	}
+	return identityFromConfig(cfg, host)
+}
+
+// fingerprintForOptions 加载或创建 opts.FingerprintUserID 的指纹（调用方保证已设置）
+func fingerprintForOptions(opts *ConnectOptions) (*FingerprintConfig, error) {
 	dir := opts.FingerprintDir
 	if dir == "" {
 		dir = "./fingerprints"
@@ -203,11 +212,7 @@ func identityForOptions(opts *ConnectOptions, host hostInfo) (*Identity, error) 
 	if err != nil {
 		return nil, fmt.Errorf("fingerprint manager: %w", err)
 	}
-	cfg, err := manager.GetOrCreateUserFingerprint(opts.FingerprintUserID, GetInitParamsFromOptions(opts))
-	if err != nil {
-		return nil, err
-	}
-	return identityFromConfig(cfg, host)
+	return manager.GetOrCreateUserFingerprint(opts.FingerprintUserID, GetInitParamsFromOptions(opts))
 }
 
 // browserHostInfo 返回 Chrome 进程的真实浏览器信息，同一进程只读一次：经浏览器级连接在启动时的标签页上读取。
