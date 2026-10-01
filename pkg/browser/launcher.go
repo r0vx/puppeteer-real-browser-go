@@ -134,6 +134,7 @@ func (cl *ChromeLauncher) buildChromeFlags(opts *ConnectOptions, port int, userD
 		if opts.Proxy != nil {
 			proxyFlags := config.GetProxyFlags(opts.Proxy.Host, opts.Proxy.Port)
 			flags = append(flags, proxyFlags...)
+			flags = append(flags, config.GetWebRTCFlags(true)...)
 		}
 
 		// Add extension flags if configured
@@ -222,6 +223,7 @@ func (cl *ChromeLauncher) buildChromeFlags(opts *ConnectOptions, port int, userD
 		if opts.Proxy != nil {
 			proxyFlags := config.GetProxyFlags(opts.Proxy.Host, opts.Proxy.Port)
 			flags = append(flags, proxyFlags...)
+			flags = append(flags, config.GetWebRTCFlags(true)...)
 		}
 
 		// Add cache flags if enabled

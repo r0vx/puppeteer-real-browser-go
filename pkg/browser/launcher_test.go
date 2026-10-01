@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -137,5 +138,26 @@ func TestCloseShutsDownGracefully(t *testing.T) {
 	}
 	if got := prefs.Profile.ExitType; got != "SessionEnded" && got != "Normal" {
 		t.Errorf("profile.exit_type = %q, want SessionEnded or Normal", got)
+	}
+}
+
+// TestWebRTCPolicyFlag 配置代理时启动参数禁止 WebRTC 绕过代理；未配置代理时不加（不影响直连用户的 WebRTC）
+func TestWebRTCPolicyFlag(t *testing.T) {
+	const flag = "--force-webrtc-ip-handling-policy=disable_non_proxied_udp"
+	proxy := &ProxyConfig{Host: "127.0.0.1", Port: "8080"}
+	cases := []struct {
+		name string
+		opts *ConnectOptions
+		want bool
+	}{
+		{"proxy", &ConnectOptions{Proxy: proxy}, true},
+		{"proxy with IgnoreAllFlags", &ConnectOptions{IgnoreAllFlags: true, Proxy: proxy}, true},
+		{"no proxy", &ConnectOptions{}, false},
+	}
+	for _, tc := range cases {
+		flags := NewChromeLauncher().buildChromeFlags(tc.opts, 9222, t.TempDir())
+		if got := slices.Contains(flags, flag); got != tc.want {
+			t.Errorf("%s: has %s = %v, want %v", tc.name, flag, got, tc.want)
+		}
 	}
 }
