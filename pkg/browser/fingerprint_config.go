@@ -79,6 +79,7 @@ type BrowserConfig struct {
 	HardwareConcurrency int      `json:"hardware_concurrency"`
 	MaxTouchPoints      int      `json:"max_touch_points"`
 	WebDriver           *bool    `json:"webdriver"`
+	PlatformVersion     string   `json:"platform_version,omitempty"` // client hints platformVersion（Win10 10.0.0、Win11 15.0.0 / 19.0.0、macOS 版本号）
 }
 
 // SystemConfig 系统配置
