@@ -55,6 +55,12 @@ func (rb *RealBrowser) Connect(ctx context.Context, opts *ConnectOptions) (*Brow
 	instance.page = page
 	rb.instance = instance
 
+	// 与原版一致：开启 Turnstile 时在页面生命周期内后台自动点击
+	if opts.Turnstile {
+		instance.turnstile = NewTurnstileAutoSolver(page, browserCtx)
+		instance.turnstile.Start()
+	}
+
 	return instance, nil
 }
 
@@ -68,6 +74,10 @@ func (rb *RealBrowser) Close() error {
 
 // Close closes the browser instance
 func (bi *BrowserInstance) Close() error {
+	// 先停 Turnstile 循环，避免它在页面关闭过程中继续发命令
+	if bi.turnstile != nil {
+		bi.turnstile.Stop()
+	}
 	if bi.cancel != nil {
 		bi.cancel()
 	}

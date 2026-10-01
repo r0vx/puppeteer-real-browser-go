@@ -104,8 +104,9 @@ type BrowserInstance struct {
 	chrome       *ChromeProcess
 	ctx          context.Context
 	cancel       context.CancelFunc
-	lastUsed     time.Time    // 最后使用时间（用于健康检查优化）
-	healthStatus atomic.Value // 缓存的健康状态
+	lastUsed     time.Time            // 最后使用时间（用于健康检查优化）
+	healthStatus atomic.Value         // 缓存的健康状态
+	turnstile    *TurnstileAutoSolver // ConnectOptions.Turnstile 开启时的后台求解器
 }
 
 // BrowserContext represents a browser context (like puppeteer browserContext)
