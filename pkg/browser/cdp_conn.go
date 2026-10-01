@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -171,4 +172,24 @@ func (c *cdpConn) subscribe(session, method string, fn func(session string, para
 func (c *cdpConn) close() error {
 	c.cancel()
 	return c.ws.Close()
+}
+
+// dialBrowser 连接浏览器级 CDP WebSocket（/json/version 中的 webSocketDebuggerUrl）
+func dialBrowser(port int) (*cdpConn, error) {
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Get(fmt.Sprintf("http://localhost:%d/json/version", port))
+	if err != nil {
+		return nil, fmt.Errorf("get browser endpoint: %w", err)
+	}
+	defer resp.Body.Close()
+	var v struct {
+		WebSocketDebuggerURL string `json:"webSocketDebuggerUrl"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&v); err != nil {
+		return nil, fmt.Errorf("decode browser endpoint: %w", err)
+	}
+	if v.WebSocketDebuggerURL == "" {
+		return nil, fmt.Errorf("browser endpoint has no webSocketDebuggerUrl")
+	}
+	return dialCDP(v.WebSocketDebuggerURL)
 }
