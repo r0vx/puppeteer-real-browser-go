@@ -419,27 +419,42 @@ func CreateCustomCDPConnector() *CustomCDPConnector {
 
 // Connect establishes a connection using custom CDP client
 func (ccc *CustomCDPConnector) Connect(ctx context.Context, chrome *ChromeProcess, opts *ConnectOptions) (Page, error) {
-	debugURL := fmt.Sprintf("http://localhost:%d", chrome.Port)
-
-	client, err := NewCustomCDPClient(debugURL)
+	conn, err := dialBrowser(chrome.Port)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create custom CDP client: %w", err)
+		return nil, fmt.Errorf("failed to connect to browser: %w", err)
+	}
+	mainTarget, err := initialPageTarget(conn)
+	if err != nil {
+		conn.close()
+		return nil, err
+	}
+	host, err := readHostInfo(conn, mainTarget)
+	if err != nil {
+		conn.close()
+		return nil, err
+	}
+	id, err := identityForOptions(opts, host)
+	if err != nil {
+		conn.close()
+		return nil, err
+	}
+	session, err := startTargetManager(conn, id, mainTarget)
+	if err != nil {
+		conn.close()
+		return nil, err
 	}
 
 	page := &CustomCDPPage{
-		client: client,
+		client: &CustomCDPClient{conn: conn, sessionID: session},
 		chrome: chrome,
 		opts:   opts,
 		ctx:    ctx,
 		cursor: NewGhostCursor(),
 	}
-
-	// Initialize the page with stealth settings
 	if err := page.initialize(); err != nil {
-		client.Close()
+		conn.close()
 		return nil, fmt.Errorf("failed to initialize custom CDP page: %w", err)
 	}
-
 	return page, nil
 }
 
@@ -470,7 +485,7 @@ func (p *CustomCDPPage) getCursor() *GhostCursor {
 	return p.cursor
 }
 
-// initialize sets up the custom CDP page with stealth features
+// initialize 启用页面所需的域与代理认证；身份与注入脚本已由 target manager 在页面运行前下发
 func (p *CustomCDPPage) initialize() error {
 	// Enable necessary domains
 	if err := p.client.EnablePageDomain(); err != nil {
@@ -492,63 +507,7 @@ func (p *CustomCDPPage) initialize() error {
 		}
 	}
 
-	// CRITICAL: Inject stealth script on new document WITHOUT Runtime.Enable
-	var script string
-	var userAgent string
-	var platform string
-
-	// 检查是否指定了用户ID
-	if p.opts != nil && p.opts.FingerprintUserID != "" {
-		// 使用 UserFingerprintManager 获取或生成指纹
-		fingerprintDir := p.opts.FingerprintDir
-		if fingerprintDir == "" {
-			fingerprintDir = "./fingerprints"
-		}
-		manager, err := NewUserFingerprintManager(fingerprintDir)
-		if err == nil {
-			// 提取初始化参数（Width、Height、UserAgent）
-			initParams := GetInitParamsFromOptions(p.opts)
-			config, err := manager.GetOrCreateUserFingerprint(p.opts.FingerprintUserID, initParams)
-			if err == nil {
-				// 使用缓存的脚本（基于 userID）
-				script = GetCachedStealthScriptWithConfig(config)
-				// 获取 UserAgent 和 Platform
-				userAgent = config.Browser.UserAgent
-				platform = config.Browser.Platform
-			}
-		}
-		// 如果获取失败，使用默认脚本
-		if script == "" {
-			script = GetCachedAdvancedStealthScript()
-		}
-	} else {
-		// 使用默认的高级 stealth 脚本（缓存版本）
-		script = GetCachedAdvancedStealthScript()
-		// 如果直接设置了 UserAgent（不使用 FingerprintUserID）
-		if p.opts != nil && p.opts.UserAgent != "" {
-			userAgent = p.opts.UserAgent
-		}
-	}
-
-	// 设置 HTTP 请求头的 UserAgent（关键！）
-	if userAgent != "" {
-		params := map[string]interface{}{
-			"userAgent": userAgent,
-		}
-		if platform != "" {
-			params["platform"] = platform
-		}
-		if _, err := p.client.sendCommand("Emulation.setUserAgentOverride", params); err != nil {
-			// 不要失败，只是警告
-			fmt.Printf("⚠️ 设置 UserAgent 失败: %v\n", err)
-		}
-	}
-
-	_, err := p.client.sendCommand("Page.addScriptToEvaluateOnNewDocument", map[string]interface{}{
-		"source": script,
-	})
-
-	return err
+	return nil
 }
 
 // AddScriptToEvaluateOnNewDocument adds a script to be evaluated on every new document

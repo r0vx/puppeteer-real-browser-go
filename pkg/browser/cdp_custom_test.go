@@ -30,8 +30,10 @@ func TestCustomCDPPage(t *testing.T) {
 	}{
 		// /json 首项可能是 browser_ui（omnibox 弹层，视口 1x1），必须挂到 type=page 的标签页
 		{"attached to page target", `innerWidth > 100 && innerHeight > 100`, true},
-		// stealth 脚本在新文档生效：screenX 由 clientX + window.screenX 推导（原生为 0）
-		{"stealth script injected", `new MouseEvent('click', {clientX: 100}).screenX - (window.screenX || 0)`, float64(100)},
+		// 身份在新文档生效：无界面默认的 800×600 屏幕已被替换，可用区域扣除了任务栏 / 菜单栏
+		{"identity applied on new document", `screen.width === 1920 && screen.height === 1080 && screen.availHeight < screen.height`, true},
+		// 脚本自己构造的（未受信）鼠标事件保持原生：screenX 就是构造参数里的值
+		{"untrusted MouseEvent native", `new MouseEvent('click', {clientX: 100}).screenX`, float64(0)},
 		// headless UA 伪装：读取不能递归爆栈，也不能残留 HeadlessChrome
 		{"userAgent readable", `navigator.userAgent.includes('Chrome/') && !navigator.userAgent.includes('HeadlessChrome')`, true},
 		// 设置振荡器频率不能抛错，读回值必须等于设置值

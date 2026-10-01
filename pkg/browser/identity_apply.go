@@ -188,3 +188,23 @@ func applyIdentity(call cdpCaller, id *Identity, kind targetKind) error {
 func windowBounds(id *Identity) map[string]any {
 	return map[string]any{"left": 0, "top": id.Screen.AvailTop, "width": id.Screen.OuterWidth, "height": id.Screen.OuterHeight}
 }
+
+// identityForOptions 设了 FingerprintUserID 时由账号指纹派生身份，否则用真实浏览器身份（只去掉无界面痕迹）
+func identityForOptions(opts *ConnectOptions, host hostInfo) (*Identity, error) {
+	if opts == nil || opts.FingerprintUserID == "" {
+		return hostIdentity(host), nil
+	}
+	dir := opts.FingerprintDir
+	if dir == "" {
+		dir = "./fingerprints"
+	}
+	manager, err := NewUserFingerprintManager(dir)
+	if err != nil {
+		return nil, fmt.Errorf("fingerprint manager: %w", err)
+	}
+	cfg, err := manager.GetOrCreateUserFingerprint(opts.FingerprintUserID, GetInitParamsFromOptions(opts))
+	if err != nil {
+		return nil, err
+	}
+	return identityFromConfig(cfg, host)
+}
