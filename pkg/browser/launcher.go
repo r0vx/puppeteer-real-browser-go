@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/r0vx/puppeteer-real-browser-go/internal/config"
@@ -44,11 +43,17 @@ func (cl *ChromeLauncher) Launch(ctx context.Context, opts *ConnectOptions) (*Ch
 		return nil, fmt.Errorf("failed to find free port: %w", err)
 	}
 
-	// Build Chrome flags
-	flags, err := cl.buildChromeFlags(opts, port)
+	userDataDir, isTemp, err := cl.getUserDataDir(opts)
 	if err != nil {
-		return nil, fmt.Errorf("failed to build Chrome flags: %w", err)
+		return nil, fmt.Errorf("failed to prepare user data dir: %w", err)
 	}
+	tempDir := ""
+	if isTemp {
+		tempDir = userDataDir
+	}
+
+	// Build Chrome flags
+	flags := cl.buildChromeFlags(opts, port, userDataDir)
 
 	// DEBUG: 打印实际的Chrome启动参数 (可选)
 	// fmt.Printf("🔧 Chrome启动路径: %s\n", chromePath)
@@ -59,26 +64,34 @@ func (cl *ChromeLauncher) Launch(ctx context.Context, opts *ConnectOptions) (*Ch
 
 	// Create Chrome command
 	cmd := exec.CommandContext(ctx, chromePath, flags...)
-
-	// Set process group for proper cleanup
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Setpgid: true,
-	}
+	// 进程组与 ctx 取消时的退出方式因平台而异，见 process_*.go
+	configureChromeCmd(cmd)
 
 	// Start Chrome process
 	if err := cmd.Start(); err != nil {
+		if tempDir != "" {
+			os.RemoveAll(tempDir)
+		}
 		return nil, fmt.Errorf("failed to start Chrome: %w", err)
 	}
 
 	chrome := &ChromeProcess{
-		Cmd:   cmd,
-		Port:  port,
-		PID:   cmd.Process.Pid,
-		Flags: flags,
+		Cmd:             cmd,
+		Port:            port,
+		PID:             cmd.Process.Pid,
+		Flags:           flags,
+		tempUserDataDir: tempDir,
+		exited:          make(chan struct{}),
 	}
+	// 后台 Wait 回收进程，exited 关闭即已退出；IsRunning/Kill 据此判断，
+	// 不能用 signal 0：未回收的僵尸进程同样收信号成功
+	go func() {
+		cmd.Wait()
+		close(chrome.exited)
+	}()
 
 	// Wait for Chrome to be ready
-	if err := cl.waitForChromeReady(ctx, port); err != nil {
+	if err := cl.waitForChromeReady(ctx, port, chrome.exited); err != nil {
 		chrome.Kill()
 		return nil, fmt.Errorf("Chrome failed to start properly: %w", err)
 	}
@@ -102,12 +115,15 @@ func (cl *ChromeLauncher) findChromeExecutable(opts *ConnectOptions) (string, er
 }
 
 // buildChromeFlags constructs the Chrome command line flags
-func (cl *ChromeLauncher) buildChromeFlags(opts *ConnectOptions, port int) ([]string, error) {
+func (cl *ChromeLauncher) buildChromeFlags(opts *ConnectOptions, port int, userDataDir string) []string {
 	var flags []string
 
 	if opts.IgnoreAllFlags {
 		// Use minimal flags when ignoring defaults
 		flags = append(flags, fmt.Sprintf("--remote-debugging-port=%d", port))
+		// 与 chrome-launcher 一致：忽略默认参数时仍需独立 profile，否则会撞上用户正在用的默认 profile，
+		// Chrome 不开窗口（"no browser is open"）；放在 opts.Args 前，调用方自带的 --user-data-dir 优先
+		flags = append(flags, "--user-data-dir="+userDataDir)
 		flags = append(flags, opts.Args...)
 
 		// Add headless flags if needed
@@ -169,10 +185,6 @@ func (cl *ChromeLauncher) buildChromeFlags(opts *ConnectOptions, port int) ([]st
 		filteredFlags = append(filteredFlags, fmt.Sprintf("--remote-debugging-port=%d", port))
 
 		// Add user data directory
-		userDataDir, err := cl.getUserDataDir(opts)
-		if err != nil {
-			return nil, err
-		}
 		filteredFlags = append(filteredFlags, "--user-data-dir="+userDataDir)
 
 		// 处理扩展
@@ -224,36 +236,47 @@ func (cl *ChromeLauncher) buildChromeFlags(opts *ConnectOptions, port int) ([]st
 		}
 	}
 
-	return flags, nil
+	return flags
 }
 
-// getUserDataDir gets or creates user data directory
-func (cl *ChromeLauncher) getUserDataDir(opts *ConnectOptions) (string, error) {
+// getUserDataDir gets or creates user data directory.
+// isTemp 仅在目录由本库临时创建时为 true，只有这种目录会在 Kill 后删除。
+func (cl *ChromeLauncher) getUserDataDir(opts *ConnectOptions) (dir string, isTemp bool, err error) {
 	// 1. 优先使用自定义配置
 	if opts.CustomConfig != nil {
 		if userDataDir, ok := opts.CustomConfig["userDataDir"].(string); ok && userDataDir != "" {
-			return userDataDir, nil
+			return userDataDir, false, nil
 		}
 	}
 
 	// 2. 如果启用了持久化配置，使用持久化目录
 	if opts.PersistProfile && opts.ProfileName != "" {
-		return utils.GetPersistentUserDataDir(opts.ProfileName)
+		dir, err = utils.GetPersistentUserDataDir(opts.ProfileName)
+		return dir, false, err
 	}
 
 	// 3. 默认使用临时目录
-	return utils.GetUserDataDir()
+	dir, err = utils.GetUserDataDir()
+	return dir, true, err
 }
 
-// waitForChromeReady waits for Chrome to be ready for connections
-func (cl *ChromeLauncher) waitForChromeReady(ctx context.Context, port int) error {
-	timeout := 30 * time.Second
-	interval := 500 * time.Millisecond
-
-	return utils.WaitWithTimeout(func() bool {
-		// Try to connect to the debug port to see if Chrome is ready
-		return cl.isDebugPortReady(port)
-	}, timeout, interval)
+// waitForChromeReady waits for Chrome to be ready for connections.
+// Chrome 提前退出（参数错误、profile 被占用转交给已有进程等）时立即返回，不必等满超时
+func (cl *ChromeLauncher) waitForChromeReady(ctx context.Context, port int, exited <-chan struct{}) error {
+	deadline := time.Now().Add(30 * time.Second)
+	for !cl.isDebugPortReady(port) {
+		if time.Now().After(deadline) {
+			return fmt.Errorf("timeout waiting for debug port %d", port)
+		}
+		select {
+		case <-exited:
+			return fmt.Errorf("Chrome exited before debug port %d was ready", port)
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+	return nil
 }
 
 // isDebugPortReady checks if Chrome's debug port is ready
@@ -271,23 +294,20 @@ func (cl *ChromeLauncher) isDebugPortReady(port int) bool {
 
 // Kill terminates the Chrome process
 func (cp *ChromeProcess) Kill() error {
-	if cp.Cmd == nil || cp.Cmd.Process == nil {
+	if cp.Cmd == nil || cp.Cmd.Process == nil || cp.exited == nil {
 		return nil
 	}
+	// 进程退出后删除临时 profile（尽力而为，删除失败不影响关闭结果）
+	if cp.tempUserDataDir != "" {
+		defer cp.removeTempUserDataDir()
+	}
 
-	// Try graceful shutdown first
-	if err := cp.Cmd.Process.Signal(syscall.SIGTERM); err == nil {
-		// Wait for graceful shutdown
-		done := make(chan error, 1)
-		go func() {
-			done <- cp.Cmd.Wait()
-		}()
-
+	// 先请求正常退出（让 profile 落盘）；平台不支持时直接强杀
+	if terminateProcess(cp.Cmd.Process) == nil {
 		select {
-		case <-done:
+		case <-cp.exited:
 			return nil
 		case <-time.After(5 * time.Second):
-			// Graceful shutdown timeout, force kill
 		}
 	}
 
@@ -295,49 +315,33 @@ func (cp *ChromeProcess) Kill() error {
 	if err := cp.killProcessTree(); err != nil {
 		return fmt.Errorf("failed to kill Chrome process tree: %w", err)
 	}
-
-	return nil
+	select {
+	case <-cp.exited:
+		return nil
+	case <-time.After(5 * time.Second):
+		return fmt.Errorf("Chrome process %d still running after kill", cp.PID)
+	}
 }
 
-// killProcessTree kills the process and all its children
-func (cp *ChromeProcess) killProcessTree() error {
-	if cp.PID == 0 {
-		return nil
-	}
-
-	// 杀整个进程组（负号表示进程组）
-	// 因为启动时设置了 Setpgid: true，Chrome 及其所有子进程都在同一个进程组中
-	if err := syscall.Kill(-cp.PID, syscall.SIGKILL); err != nil {
-		// 进程可能已经不存在
-		if err != syscall.ESRCH {
-			// 如果进程组杀失败，尝试只杀主进程
-			if killErr := syscall.Kill(cp.PID, syscall.SIGKILL); killErr != nil && killErr != syscall.ESRCH {
-				return fmt.Errorf("failed to kill process: %w", killErr)
-			}
-		}
-	}
-
-	// 等待进程完全终止
-	time.Sleep(100 * time.Millisecond)
-
-	// 验证进程已终止
-	if err := syscall.Kill(cp.PID, 0); err == nil {
-		// 进程仍在运行，记录警告但不返回错误
-		fmt.Printf("Warning: Chrome process %d still running after SIGKILL\n", cp.PID)
-	}
-
-	return nil
+// removeTempUserDataDir 删除本库创建的临时 profile。
+// 主进程退出后 network service 等辅助进程可能仍在落盘，会把删掉的文件重新写回，
+// 所以先等它们退出（最多 3s，超时强杀）再删除。
+func (cp *ChromeProcess) removeTempUserDataDir() {
+	cp.waitProcessTreeExit(3 * time.Second)
+	os.RemoveAll(cp.tempUserDataDir)
 }
 
 // IsRunning checks if the Chrome process is still running
 func (cp *ChromeProcess) IsRunning() bool {
-	if cp.Cmd == nil || cp.Cmd.Process == nil {
+	if cp.exited == nil {
 		return false
 	}
-
-	// Check if process is still running by sending signal 0
-	err := syscall.Kill(cp.PID, 0)
-	return err == nil
+	select {
+	case <-cp.exited:
+		return false
+	default:
+		return true
+	}
 }
 
 // setupXvfb sets up Xvfb virtual display on Linux when headless is false

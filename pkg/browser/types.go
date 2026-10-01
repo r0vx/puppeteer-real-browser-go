@@ -122,6 +122,9 @@ type ChromeProcess struct {
 	Port  int
 	PID   int
 	Flags []string
+
+	tempUserDataDir string        // 本库创建的临时 profile，Kill 后删除；调用方指定或持久化的目录为空
+	exited          chan struct{} // 进程退出且已被 Wait 回收时关闭
 }
 
 // Page represents a browser page interface

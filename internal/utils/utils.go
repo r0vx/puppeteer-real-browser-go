@@ -108,15 +108,14 @@ func IsWindows() bool {
 	return runtime.GOOS == "windows"
 }
 
-// GetUserDataDir returns a suitable user data directory for Chrome
+// GetUserDataDir returns a suitable user data directory for Chrome.
+// 用 os.MkdirTemp 保证唯一：macOS 上 UnixNano 只有微秒精度，并发启动时时间戳会撞名，
+// 两个 Chrome 共用 profile 会导致后一个起不来，关闭时还会删掉对方正在用的目录
 func GetUserDataDir() (string, error) {
-	tmpDir := os.TempDir()
-	userDataDir := fmt.Sprintf("%s/puppeteer-real-browser-go-%d", tmpDir, time.Now().UnixNano())
-
-	if err := os.MkdirAll(userDataDir, 0755); err != nil {
+	userDataDir, err := os.MkdirTemp("", "puppeteer-real-browser-go-*")
+	if err != nil {
 		return "", fmt.Errorf("failed to create user data directory: %w", err)
 	}
-
 	return userDataDir, nil
 }
 
