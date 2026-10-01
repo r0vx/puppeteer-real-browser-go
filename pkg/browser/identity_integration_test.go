@@ -352,8 +352,9 @@ func TestSetViewportKeepsIdentity(t *testing.T) {
 // 新页拿到的是账号身份（由 target manager 下发），不会被 chromedp 路径用默认身份覆盖
 func TestNewPageOnCustomCDPInstance(t *testing.T) {
 	ss := newSurfaceServers(t)
-	inst, err := Connect(t.Context(), &ConnectOptions{Headless: true, UseCustomCDP: true, FingerprintUserID: "newpage-mac", FingerprintDir: t.TempDir(),
-		UserAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"})
+	// 用 Windows 身份：与 macOS / Linux 宿主都不同，才能看出哪个值没被覆盖
+	inst, err := Connect(t.Context(), &ConnectOptions{Headless: true, UseCustomCDP: true, FingerprintUserID: "newpage-win", FingerprintDir: t.TempDir(),
+		UserAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -373,7 +374,7 @@ func TestNewPageOnCustomCDPInstance(t *testing.T) {
 	if err := np.Navigate(ss.main.URL + "/plain"); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := np.Evaluate(`[navigator.platform, navigator.userAgentData.platform, navigator.userAgent.includes('Macintosh')].join()`); err != nil || got != "MacIntel,macOS,true" {
-		t.Errorf("new page identity = %v (%v), want MacIntel,macOS,true", got, err)
+	if got, err := np.Evaluate(`[navigator.platform, navigator.userAgentData.platform, navigator.userAgent.includes('Windows NT')].join()`); err != nil || got != "Win32,Windows,true" {
+		t.Errorf("new page identity = %v (%v), want Win32,Windows,true", got, err)
 	}
 }
