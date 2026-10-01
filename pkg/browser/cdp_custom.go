@@ -14,30 +14,14 @@ import (
 	"time"
 
 	"github.com/chromedp/cdproto/fetch"
-	"github.com/gorilla/websocket"
 )
 
-// CustomCDPClient implements a custom CDP client that avoids Runtime.Enable leaks
+// CustomCDPClient implements a custom CDP client that avoids Runtime.Enable leaks.
+// 它是"连接 + 会话"：sessionID 为空表示直连页面 WebSocket，非空表示浏览器级连接上的 flatten 会话
 type CustomCDPClient struct {
-	conn           *websocket.Conn
-	url            string
-	messageID      int64
-	messageIDMutex sync.Mutex
-	responses      map[int64]chan CDPResponse
-	responsesMutex sync.RWMutex
-	writeMutex     sync.Mutex // 添加写入锁防止并发写入
-	ctx            context.Context
-	cancel         context.CancelFunc
-	// 事件监听
-	eventHandlers      map[string][]eventSub
-	eventHandlersMutex sync.RWMutex
-	nextSubID          int64
-}
-
-// eventSub 一个事件订阅，id 用于取消
-type eventSub struct {
-	id int64
-	fn func(json.RawMessage)
+	conn      *cdpConn
+	sessionID string
+	url       string
 }
 
 // CDPMessage represents a CDP message
@@ -97,94 +81,11 @@ func NewCustomCDPClient(debugURL string) (*CustomCDPClient, error) {
 		return nil, fmt.Errorf("no page target found among %d targets", len(targets))
 	}
 
-	// Connect to WebSocket
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	conn, err := dialCDP(wsURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to WebSocket: %w", err)
 	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-
-	client := &CustomCDPClient{
-		conn:          conn,
-		url:           wsURL,
-		responses:     make(map[int64]chan CDPResponse),
-		eventHandlers: make(map[string][]eventSub),
-		ctx:           ctx,
-		cancel:        cancel,
-	}
-
-	// Start message handler
-	go client.handleMessages()
-
-	return client, nil
-}
-
-// handleMessages handles incoming WebSocket messages
-func (c *CustomCDPClient) handleMessages() {
-	defer c.conn.Close()
-
-	for {
-		select {
-		case <-c.ctx.Done():
-			return
-		default:
-			_, message, err := c.conn.ReadMessage()
-			if err != nil {
-				return
-			}
-
-			// 先尝试解析基础结构
-			var base struct {
-				ID     int64  `json:"id"`
-				Method string `json:"method"`
-			}
-			if err := json.Unmarshal(message, &base); err != nil {
-				continue
-			}
-
-			// 有 ID 的是响应
-			if base.ID > 0 {
-				var response CDPResponse
-				if err := json.Unmarshal(message, &response); err == nil {
-					c.responsesMutex.RLock()
-					if ch, exists := c.responses[response.ID]; exists {
-						select {
-						case ch <- response:
-						case <-time.After(5 * time.Second):
-						}
-					}
-					c.responsesMutex.RUnlock()
-				}
-				continue
-			}
-
-			// 有 method 的是事件
-			if base.Method != "" {
-				var event CDPEvent
-				if err := json.Unmarshal(message, &event); err == nil {
-					c.eventHandlersMutex.RLock()
-					// 复制 handlers 避免长时间持锁
-					subs := c.eventHandlers[event.Method]
-					handlers := make([]func(json.RawMessage), len(subs))
-					for i, s := range subs {
-						handlers[i] = s.fn
-					}
-					c.eventHandlersMutex.RUnlock()
-
-					// 异步执行 handlers，避免阻塞消息循环
-					if len(handlers) > 0 {
-						params := event.Params // 捕获参数
-						go func() {
-							for _, handler := range handlers {
-								handler(params)
-							}
-						}()
-					}
-				}
-			}
-		}
-	}
+	return &CustomCDPClient{conn: conn, url: wsURL}, nil
 }
 
 // OnEvent subscribes to a CDP event
@@ -192,67 +93,14 @@ func (c *CustomCDPClient) OnEvent(method string, handler func(json.RawMessage)) 
 	c.subscribe(method, handler)
 }
 
-// subscribe 订阅事件并返回取消函数（用于导航等待这类一次性监听）
+// subscribe 订阅本会话的事件并返回取消函数（用于导航等待这类一次性监听）
 func (c *CustomCDPClient) subscribe(method string, handler func(json.RawMessage)) (unsubscribe func()) {
-	c.eventHandlersMutex.Lock()
-	c.nextSubID++
-	id := c.nextSubID
-	c.eventHandlers[method] = append(c.eventHandlers[method], eventSub{id: id, fn: handler})
-	c.eventHandlersMutex.Unlock()
-
-	return func() {
-		c.eventHandlersMutex.Lock()
-		defer c.eventHandlersMutex.Unlock()
-		c.eventHandlers[method] = slices.DeleteFunc(c.eventHandlers[method], func(s eventSub) bool { return s.id == id })
-	}
+	return c.conn.subscribe(c.sessionID, method, func(_ string, params json.RawMessage) { handler(params) })
 }
 
-// sendCommand sends a CDP command and waits for response
+// sendCommand sends a CDP command on this session and waits for the response
 func (c *CustomCDPClient) sendCommand(method string, params interface{}) (json.RawMessage, error) {
-	c.messageIDMutex.Lock()
-	c.messageID++
-	id := c.messageID
-	c.messageIDMutex.Unlock()
-
-	// Create response channel
-	respChan := make(chan CDPResponse, 1)
-	c.responsesMutex.Lock()
-	c.responses[id] = respChan
-	c.responsesMutex.Unlock()
-
-	defer func() {
-		c.responsesMutex.Lock()
-		delete(c.responses, id)
-		c.responsesMutex.Unlock()
-	}()
-
-	// Send message with write lock
-	message := CDPMessage{
-		ID:     id,
-		Method: method,
-		Params: params,
-	}
-
-	c.writeMutex.Lock()
-	err := c.conn.WriteJSON(message)
-	c.writeMutex.Unlock()
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to send message: %w", err)
-	}
-
-	// Wait for response
-	select {
-	case response := <-respChan:
-		if response.Error != nil {
-			return nil, fmt.Errorf("CDP error: %s", response.Error.Message)
-		}
-		return response.Result, nil
-	case <-time.After(30 * time.Second):
-		return nil, fmt.Errorf("timeout waiting for response")
-	case <-c.ctx.Done():
-		return nil, fmt.Errorf("context cancelled")
-	}
+	return c.conn.call(c.sessionID, method, params)
 }
 
 // Navigate navigates to a URL without using Runtime.Enable
@@ -477,8 +325,7 @@ func (c *CustomCDPClient) Type(text string) error {
 
 // Close closes the CDP connection
 func (c *CustomCDPClient) Close() error {
-	c.cancel()
-	return c.conn.Close()
+	return c.conn.close()
 }
 
 // EnablePageDomain enables Page domain events
