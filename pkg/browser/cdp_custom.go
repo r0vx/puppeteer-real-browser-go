@@ -66,19 +66,25 @@ func NewCustomCDPClient(debugURL string) (*CustomCDPClient, error) {
 	}
 	defer resp.Body.Close()
 
-	var tabs []map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&tabs); err != nil {
+	var targets []struct {
+		Type                 string `json:"type"`
+		WebSocketDebuggerURL string `json:"webSocketDebuggerUrl"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&targets); err != nil {
 		return nil, fmt.Errorf("failed to decode debug info: %w", err)
 	}
 
-	if len(tabs) == 0 {
-		return nil, fmt.Errorf("no tabs found")
+	// /json 还会列出 browser_ui（如 omnibox 弹层，视口 1x1）等非页面目标，只能挂到 page 上
+	// ponytail: 不轮询等待标签页注册，launcher 已等到调试端口就绪；若出现 "no page target" 再加重试
+	var wsURL string
+	for _, t := range targets {
+		if t.Type == "page" && t.WebSocketDebuggerURL != "" {
+			wsURL = t.WebSocketDebuggerURL
+			break
+		}
 	}
-
-	// Get the WebSocket URL for the first tab
-	wsURL, ok := tabs[0]["webSocketDebuggerUrl"].(string)
-	if !ok {
-		return nil, fmt.Errorf("no WebSocket URL found")
+	if wsURL == "" {
+		return nil, fmt.Errorf("no page target found among %d targets", len(targets))
 	}
 
 	// Connect to WebSocket
@@ -353,8 +359,8 @@ func (c *CustomCDPClient) TakeScreenshot() ([]byte, error) {
 		return nil, err
 	}
 
-	// Decode base64
-	return []byte(response.Data), nil
+	// CDP 返回 base64 文本，Page 接口约定返回 PNG 原始字节
+	return base64.StdEncoding.DecodeString(response.Data)
 }
 
 // MoveMouse moves mouse to a position
@@ -910,6 +916,9 @@ func (p *CustomCDPPage) SetViewport(width, height int) error {
 	params := map[string]interface{}{
 		"width":  width,
 		"height": height,
+		// 两者为必填参数；deviceScaleFactor=0 表示不覆盖 DPR，避免改变 devicePixelRatio 指纹
+		"deviceScaleFactor": 0,
+		"mobile":            false,
 	}
 	_, err := p.client.sendCommand("Emulation.setDeviceMetricsOverride", params)
 	return err

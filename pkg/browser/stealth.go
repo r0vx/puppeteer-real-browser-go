@@ -194,9 +194,12 @@ func GetAdvancedStealthScript() string {
 			};
 			
 			// 12. Hide automation in user agent
-			if (navigator.userAgent.includes('HeadlessChrome')) {
+			// 先取原值：getter 里再读 navigator.userAgent 会无限递归
+			const originalUserAgent = navigator.userAgent;
+			if (originalUserAgent.includes('HeadlessChrome')) {
+				const cleanUserAgent = originalUserAgent.replace('HeadlessChrome', 'Chrome');
 				Object.defineProperty(navigator, 'userAgent', {
-					get: () => navigator.userAgent.replace('HeadlessChrome', 'Chrome'),
+					get: () => cleanUserAgent,
 					configurable: true
 				});
 			}
@@ -416,8 +419,7 @@ func GetAdvancedStealthScript() string {
 				
 				// 每个会话的固定噪声因子
 				const sessionNoise = (Date.now() % 10000) / 100000; // 0.00001 - 0.1
-				const freqOffset = (Date.now() % 100) / 10000; // 0.0001 - 0.01
-				
+
 				function ModifiedAudioContext(...args) {
 					const ctx = new OriginalAudioContext(...args);
 					
@@ -454,23 +456,9 @@ func GetAdvancedStealthScript() string {
 						return analyser;
 					};
 					
-					// 重写 createOscillator - 添加微小频率偏移
-					const originalCreateOscillator = ctx.createOscillator.bind(ctx);
-					ctx.createOscillator = function() {
-						const oscillator = originalCreateOscillator();
-						
-						// 修改默认频率
-						const origFreq = oscillator.frequency;
-						const origValue = origFreq.value;
-						Object.defineProperty(origFreq, 'value', {
-							get: function() { return origValue + freqOffset; },
-							set: function(v) { origValue = v; },
-							configurable: true
-						});
-						
-						return oscillator;
-					};
-					
+					// 不重写 createOscillator：在 frequency 实例上遮蔽 value 只改 JS 读数、不影响渲染，
+					// 既不产生指纹噪声，又让读回值与设置值不一致（可被检测），setter 还吞掉赋值
+
 					// 重写 createDynamicsCompressor
 					const originalCreateDynamicsCompressor = ctx.createDynamicsCompressor.bind(ctx);
 					ctx.createDynamicsCompressor = function() {
