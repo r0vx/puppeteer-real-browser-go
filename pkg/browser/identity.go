@@ -1,6 +1,8 @@
 package browser
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
@@ -170,6 +172,14 @@ type Identity struct {
 	Screen              screenGeometry
 	GPU                 *gpuProfile // nil 表示不改写 WebGL
 	NoiseSeed           uint32      // 0 表示不加 canvas / 音频 / readPixels 噪声
+	ScriptKey           string      // 注入脚本在同源 frame / 弹窗之间共用伪装表的口令，每次派生身份随机生成
+}
+
+// newScriptKey 生成注入脚本共用伪装表的随机口令：页面猜不到它，也就无法借它探测注入
+func newScriptKey() string {
+	b := make([]byte, 16)
+	rand.Read(b) // crypto/rand 不会返回错误
+	return hex.EncodeToString(b)
 }
 
 // Locale 返回 Intl 使用的 locale
@@ -217,6 +227,7 @@ func identityFromConfig(cfg *FingerprintConfig, host hostInfo) (*Identity, error
 		Screen:              geometryFor(os, spec, cfg.Browser.PlatformVersion),
 		GPU:                 &gpu,
 		NoiseSeed:           noiseSeed(cfg.UserID),
+		ScriptKey:           newScriptKey(),
 	}, nil
 }
 
@@ -228,6 +239,7 @@ func hostIdentity(host hostInfo) *Identity {
 		formFactors = []string{"Desktop"}
 	}
 	id := &Identity{
+		ScriptKey:           newScriptKey(),
 		OS:                  OSWindows, // 仅用于几何规则；Linux 宿主按 Windows 规则扣底部面板
 		UserAgent:           strings.Replace(host.UserAgent, "HeadlessChrome/", "Chrome/", 1),
 		Platform:            host.Platform,

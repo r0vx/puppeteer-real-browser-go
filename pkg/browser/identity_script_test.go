@@ -110,6 +110,15 @@ func TestIdentityScript(t *testing.T) {
 		{"canvas noise deterministic", `(() => { const a = ` + draw + `; const b = ` + draw + `; return a === b; })()`, true},
 		{"blank canvas untouched", blank, baseBlank},
 		{"untrusted event native", `new MouseEvent('click', {clientX: 10, screenX: 5}).screenX`, float64(5)},
+		// 改写的 getter 和原生一样检查 this：在原型上调用要抛 Illegal invocation
+		{"getter checks receiver", `(() => { try { Object.getOwnPropertyDescriptor(Screen.prototype, 'availWidth').get.call(Screen.prototype); return 'no throw'; } catch (e) { return e.constructor.name; } })()`, "TypeError"},
+		// 同源 iframe 的 toString 看本页的替换函数、本页的 toString 看 iframe 的替换函数，都必须是原生文本
+		{"cross-realm toString native", `(() => { const f = document.createElement('iframe'); document.body.appendChild(f); const w = f.contentWindow, ts = w.Function.prototype.toString;
+		  return [ts.call(WebGLRenderingContext.prototype.getParameter), ts.call(Object.getOwnPropertyDescriptor(Screen.prototype, 'availHeight').get), ts.call(Function.prototype.toString),
+		    Function.prototype.toString.call(w.HTMLCanvasElement.prototype.toDataURL), Function.prototype.toString.call(ts)].join('|'); })()`,
+			"function getParameter() { [native code] }|function get availHeight() { [native code] }|function toString() { [native code] }|function toDataURL() { [native code] }|function toString() { [native code] }"},
+		// 对 toString 传入任意非函数 this 时仍按原生抛 TypeError（共享伪装表的口令猜不到）
+		{"toString on string throws", `(() => { try { Function.prototype.toString.call(''); return 'no throw'; } catch (e) { return e.constructor.name; } })()`, "TypeError"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -124,9 +133,10 @@ func TestIdentityScript(t *testing.T) {
 
 	// Worker 版本：在真实 Worker 里先执行脚本再读取 navigator
 	ws, _ := json.Marshal(identityScript(id, true) + `;postMessage([navigator.userAgent, navigator.appVersion, navigator.platform, navigator.hardwareConcurrency, navigator.languages.join(),
-	  Object.getOwnPropertyDescriptor(WorkerNavigator.prototype, 'platform').get.toString()].join('|'))`)
+	  Object.getOwnPropertyDescriptor(WorkerNavigator.prototype, 'platform').get.toString(),
+	  (() => { try { WorkerNavigator.prototype.userAgent; return 'no throw'; } catch (e) { return e.constructor.name; } })()].join('|'))`)
 	got := evalValue(t, c, `new Promise(r => { const w = new Worker(URL.createObjectURL(new Blob([`+string(ws)+`]))); w.onmessage = e => r(e.data); })`)
-	if want := winUA + "|" + strings.TrimPrefix(winUA, "Mozilla/") + "|Win32|6|ja-JP,ja|function get platform() { [native code] }"; got != want {
+	if want := winUA + "|" + strings.TrimPrefix(winUA, "Mozilla/") + "|Win32|6|ja-JP,ja|function get platform() { [native code] }|TypeError"; got != want {
 		t.Errorf("worker navigator = %v, want %v", got, want)
 	}
 }

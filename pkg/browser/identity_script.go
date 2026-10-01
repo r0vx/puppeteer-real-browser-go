@@ -13,6 +13,7 @@ type jsIdentity struct {
 	Screen              *jsScreen `json:"screen,omitempty"`
 	WebGL               *jsWebGL  `json:"webgl,omitempty"`
 	Seed                uint32    `json:"seed"`
+	Key                 string    `json:"key"` // 见 Identity.ScriptKey
 }
 
 // jsScreen 屏幕与可用区域
@@ -56,7 +57,11 @@ func webglParams(c *webglCaps) map[string]any {
 
 // identityScript 生成注入脚本；worker 为 true 时生成 Worker 版本（补 WorkerNavigator，不含 DOM / Web Audio 部分）
 func identityScript(id *Identity, worker bool) string {
-	cfg := jsIdentity{UserAgent: id.UserAgent, Platform: id.Platform, Languages: id.Languages, HardwareConcurrency: id.HardwareConcurrency, Seed: id.NoiseSeed}
+	key := id.ScriptKey
+	if key == "" {
+		key = newScriptKey()
+	}
+	cfg := jsIdentity{UserAgent: id.UserAgent, Platform: id.Platform, Languages: id.Languages, HardwareConcurrency: id.HardwareConcurrency, Seed: id.NoiseSeed, Key: key}
 	if id.Screen.Width > 0 {
 		s := id.Screen
 		cfg.Screen = &jsScreen{Width: s.Width, Height: s.Height, AvailWidth: s.AvailWidth, AvailHeight: s.AvailHeight, AvailTop: s.AvailTop, DPR: s.DPR}
@@ -76,9 +81,21 @@ func identityScript(id *Identity, worker bool) string {
 const jsPrelude = `
 const G = globalThis;
 const nativeToString = Function.prototype.toString;
-const masks = new WeakMap();
+// 伪装表在同源的父窗口 / opener 之间共用：否则拿 iframe 或弹窗自己的 toString 就能看到这里替换函数的源码。
+// 以随机口令 C.key 作 this 调用对方的 toString 取表；跨源、对方没注入或口令不同时会抛错，退回用自己的表
+let masks = new WeakMap();
+for (const w of [G.parent, G.opener]) {
+  try {
+    const shared = w && w !== G ? Reflect.apply(w.Function.prototype.toString, C.key, []) : null;
+    if (shared && typeof shared === 'object') {
+      masks = shared;
+      break;
+    }
+  } catch (e) {}
+}
 const toStringProxy = new Proxy(nativeToString, {
   apply(target, self, args) {
+    if (self === C.key) return masks;
     return masks.has(self) ? masks.get(self) : Reflect.apply(target, self, args);
   },
 });
@@ -107,7 +124,8 @@ const patchGetter = (obj, key, impl) => {
   const desc = target && Object.getOwnPropertyDescriptor(target, key);
   if (!desc || typeof desc.get !== 'function') return;
   const original = desc.get;
-  const fake = Object.getOwnPropertyDescriptor({get [key]() { return impl(original, this); }}, key).get;
+  // 先调原生 getter：this 不对时和原生一样抛 Illegal invocation
+  const fake = Object.getOwnPropertyDescriptor({get [key]() { Reflect.apply(original, this, []); return impl(original, this); }}, key).get;
   Object.defineProperty(target, key, {get: disguise(fake, original)});
 };
 const hash = (n) => {
