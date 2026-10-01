@@ -84,16 +84,13 @@ func (e *EnhancedAudioWebGLInjector) GenerateEnhancedAudioScript() string {
         return;
     }
     
-    function ModifiedAudioContext() {
-        const ctx = new OriginalAudioContext();
-        const originalSampleRate = ctx.sampleRate;
-        
-        // 修改采样率（只读属性，需要通过getter）
-        Object.defineProperty(ctx, 'sampleRate', {
-            get: () => sampleRate,
-            configurable: true
-        });
-        
+    function ModifiedAudioContext(options) {
+        // 保留页面传入的参数；未指定采样率时按指纹配置真实创建，
+        // 不再只伪造 sampleRate 读数（否则按它计算缓冲区的页面音频会变调）
+        const opts = Object.assign({}, options);
+        if (opts.sampleRate === undefined) opts.sampleRate = sampleRate;
+        const ctx = new OriginalAudioContext(opts);
+
         // 修改目标通道数
         Object.defineProperty(ctx.destination, 'maxChannelCount', {
             get: () => maxChannelCount,
@@ -116,13 +113,8 @@ func (e *EnhancedAudioWebGLInjector) GenerateEnhancedAudioScript() string {
             // 修改start方法
             const originalStart = osc.start.bind(osc);
             osc.start = function(when) {
-                // 应用用户特定的频率偏移
+                // 应用用户特定的频率偏移（不改波形：强改 type 会让页面发出的声音完全变样）
                 osc.frequency.value = osc.frequency.value + freqOffset + generateUserNoise(1, 0);
-                
-                // 修改波形类型（基于用户哈希）
-                const types = ['sine', 'square', 'sawtooth', 'triangle'];
-                osc.type = types[noiseSeed1 %% types.length];
-                
                 return originalStart(when);
             };
             
@@ -316,7 +308,9 @@ func (e *EnhancedAudioWebGLInjector) GenerateEnhancedAudioScript() string {
         return ctx;
     }
     
-    // 替换全局 AudioContext
+    // 替换全局 AudioContext；共用原型保证 instanceof 成立
+    ModifiedAudioContext.prototype = OriginalAudioContext.prototype;
+    Object.defineProperty(ModifiedAudioContext, 'name', { value: 'AudioContext' });
     window.AudioContext = ModifiedAudioContext;
     if (window.webkitAudioContext) {
         window.webkitAudioContext = ModifiedAudioContext;
@@ -326,19 +320,11 @@ func (e *EnhancedAudioWebGLInjector) GenerateEnhancedAudioScript() string {
     if (window.OfflineAudioContext) {
         const OriginalOfflineAudioContext = window.OfflineAudioContext;
         
-        window.OfflineAudioContext = function(numberOfChannels, length, sampleRateParam) {
-            // 使用修改后的采样率
-            const modifiedSampleRate = sampleRate + (noiseSeed1 %% 1000);
-            const ctx = new OriginalOfflineAudioContext(numberOfChannels, length, modifiedSampleRate);
-            
-            // 应用所有AudioContext的修改
-            const modifiedCtx = new ModifiedAudioContext();
-            for (let key in modifiedCtx) {
-                if (typeof modifiedCtx[key] === 'function' && key.startsWith('create')) {
-                    ctx[key] = modifiedCtx[key].bind(ctx);
-                }
-            }
-            
+        function ModifiedOfflineAudioContext(...args) {
+            // 按页面请求的参数创建，只在渲染结果上加噪声：
+            // 改采样率会改变渲染结果；借用实时 AudioContext 的 create* 方法会让节点属于另一个 context，连线直接报错
+            const ctx = new OriginalOfflineAudioContext(...args);
+
             // 修改startRendering
             const originalStartRendering = ctx.startRendering.bind(ctx);
             ctx.startRendering = function() {
@@ -368,9 +354,12 @@ func (e *EnhancedAudioWebGLInjector) GenerateEnhancedAudioScript() string {
                     return buffer;
                 });
             };
-            
+
             return ctx;
-        };
+        }
+        ModifiedOfflineAudioContext.prototype = OriginalOfflineAudioContext.prototype;
+        Object.defineProperty(ModifiedOfflineAudioContext, 'name', { value: 'OfflineAudioContext' });
+        window.OfflineAudioContext = ModifiedOfflineAudioContext;
     }
     
     console.log('✅ 超级增强版 Audio 指纹修改已应用', {
