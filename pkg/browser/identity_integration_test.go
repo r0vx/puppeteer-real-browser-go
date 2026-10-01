@@ -199,9 +199,11 @@ func TestIdentityAcrossSurfaces(t *testing.T) {
 				}
 			}
 
-			// 受信点击的屏幕坐标与窗口几何一致
+			// 受信点击的屏幕坐标与窗口几何一致。先关弹窗：被弹窗盖住的标签页是 hidden，输入确认要等约 5 秒（Chrome 原生行为）；
+			// 点击点避开左上角的跨站 iframe，否则事件发给 iframe 而不是主页面
+			inst.Page().Evaluate(`window.__p.close(), true`)
 			inst.Page().Evaluate(`window.__click = null; addEventListener('click', e => window.__click = [e.screenX - e.clientX, e.screenY - e.clientY, screenX + (outerWidth - innerWidth) / 2, screenY + outerHeight - innerHeight - (outerWidth - innerWidth) / 2].join())`)
-			if err := inst.Page().Click(100, 100); err != nil {
+			if err := inst.Page().Click(500, 400); err != nil {
 				t.Fatal(err)
 			}
 			time.Sleep(200 * time.Millisecond)
