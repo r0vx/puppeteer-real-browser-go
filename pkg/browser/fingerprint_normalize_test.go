@@ -174,6 +174,16 @@ func TestFingerprintManagerNormalizesAndBindsUA(t *testing.T) {
 		t.Errorf("language-only account: timezone %q languages %v, want Asia/Tokyo [ja-JP ja]", ja.Timezone.Timezone, ja.Browser.Languages)
 	}
 
+	// 只设语言列表：主语言取列表首项，时区按它推导（不能被生成器默认的 zh-CN 覆盖）
+	en, err := m.GetOrCreateUserFingerprint("langs-only", &FingerprintInitParams{Languages: []string{"en-US", "en"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if en.Browser.Language != "en-US" || !slices.Equal(en.Browser.Languages, []string{"en-US", "en"}) || en.Timezone.Timezone != "America/New_York" {
+		t.Errorf("languages-only account: language %q languages %v timezone %q, want en-US [en-US en] America/New_York",
+			en.Browser.Language, en.Browser.Languages, en.Timezone.Timezone)
+	}
+
 	legacy := legacyConfig("old-linux",
 		"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/111.0.5563.146 Safari/537.36",
 		"Google Inc. (NVIDIA)", "NVIDIA GeForce RTX 3060/PCIe/SSE2", "zh-CN", []string{"zh-CN", "zh"}, "Asia/Shanghai", 1920, 1080, 1, 8)

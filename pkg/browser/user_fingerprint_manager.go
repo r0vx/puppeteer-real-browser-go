@@ -124,6 +124,13 @@ func (ufm *UserFingerprintManager) GetOrCreateUserFingerprint(userID string, ini
 		}
 		if len(initParams.Languages) > 0 {
 			config.Browser.Languages = initParams.Languages
+			if initParams.Language == "" {
+				// 只设了语言列表：主语言取首项，否则 Normalize 会因首项与主语言不符丢掉这份列表
+				config.Browser.Language = initParams.Languages[0]
+				if initParams.Timezone == "" {
+					config.Timezone.Timezone = ""
+				}
+			}
 		}
 		if initParams.Timezone != "" {
 			config.Timezone.Timezone = initParams.Timezone
