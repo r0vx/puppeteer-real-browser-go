@@ -103,7 +103,7 @@ func TestIdentityScript(t *testing.T) {
 		{"name and length kept", `[WebGLRenderingContext.prototype.getParameter.name, WebGLRenderingContext.prototype.getParameter.length, CanvasRenderingContext2D.prototype.getImageData.length].join()`, "getParameter,1,4"},
 		{"no navigator own props", `Object.getOwnPropertyNames(navigator).length`, float64(0)},
 		{"no new globals", `Object.getOwnPropertyNames(window).length`, baseGlobals},
-		{"avail area", `[screen.availWidth, screen.availHeight, screen.availTop].join()`, "1536,826,0"},
+		{"avail area", `[screen.availWidth, screen.availHeight, screen.availTop].join()`, "1536,816,0"},
 		{"webgl profile", `(() => { const g = document.createElement('canvas').getContext('webgl'); g.getExtension('WEBGL_debug_renderer_info');
 		  return [g.getParameter(37445), g.getParameter(37446), g.getParameter(g.MAX_TEXTURE_SIZE), g.getParameter(g.MAX_VIEWPORT_DIMS) instanceof Int32Array, g.getParameter(g.MAX_VARYING_VECTORS)].join('|'); })()`,
 			gpu.Vendor + "|" + gpu.Renderer + "|16384|true|30"},

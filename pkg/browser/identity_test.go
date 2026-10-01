@@ -87,9 +87,9 @@ func TestIdentityFromConfig(t *testing.T) {
 		{"Metadata.Architecture", id.Metadata.Architecture, "x86"},
 		{"Metadata.Bitness", id.Metadata.Bitness, "64"},
 		{"Metadata.FullVersion", id.Metadata.FullVersionList[1].Version, "154.0.8037.92"},
-		{"AvailHeight", id.Screen.AvailHeight, 826}, // 864 - round(48/1.25)
-		{"OuterHeight", id.Screen.OuterHeight, 826},
-		{"InnerHeight", id.Screen.InnerHeight, 739}, // 826 - 87
+		{"AvailHeight", id.Screen.AvailHeight, 816}, // 864 - 48：Win11 任务栏 48 CSS 像素，任何缩放比例都一样
+		{"OuterHeight", id.Screen.OuterHeight, 816},
+		{"InnerHeight", id.Screen.InnerHeight, 729}, // 816 - 87
 		{"InnerWidth", id.Screen.InnerWidth, 1536},
 		{"GPU", id.GPU.Renderer, windowsGPUs[0].Value.Renderer},
 	}
@@ -97,6 +97,11 @@ func TestIdentityFromConfig(t *testing.T) {
 		if c.got != c.want {
 			t.Errorf("%s = %v, want %v", c.name, c.got, c.want)
 		}
+	}
+	// Win10 任务栏 40 CSS 像素：1920×1080 在 150% 缩放下是 1280×720，可用高度 680
+	win10 := geometryFor(OSWindows, screenSpec{Width: 1280, Height: 720, DPR: 1.5}, "10.0.0")
+	if win10.AvailHeight != 680 {
+		t.Errorf("Win10 1280x720@1.5 availHeight = %d, want 680", win10.AvailHeight)
 	}
 	if !slices.Equal(id.Metadata.FormFactors, []string{"Desktop"}) {
 		t.Errorf("FormFactors = %v, want [Desktop]", id.Metadata.FormFactors)

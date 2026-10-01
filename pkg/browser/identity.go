@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
-	"math"
 	"regexp"
 	"strings"
 	_ "time/tzdata" // 时区校验不依赖服务器是否安装 tzdata
@@ -135,7 +134,8 @@ type screenGeometry struct {
 	InnerWidth, InnerHeight                          int // 视口 = 窗口减去浏览器 UI
 }
 
-// geometryFor 由屏幕规格推算可用区域和最大化窗口：Windows 扣任务栏（Win10 40、Win11 48 物理像素），Mac 扣菜单栏（刘海机型 38，其余 25）
+// geometryFor 由屏幕规格推算可用区域和最大化窗口：Windows 扣任务栏（Win10 40、Win11 48 CSS 像素，随缩放等比放大，
+// 所以与 DPR 无关），Mac 扣菜单栏（刘海机型 38，其余 25）
 func geometryFor(os OSFamily, s screenSpec, platformVersion string) screenGeometry {
 	g := screenGeometry{Width: s.Width, Height: s.Height, DPR: s.DPR, AvailWidth: s.Width}
 	if os == OSMac {
@@ -146,11 +146,11 @@ func geometryFor(os OSFamily, s screenSpec, platformVersion string) screenGeomet
 		g.AvailTop = bar
 		g.AvailHeight = s.Height - bar
 	} else {
-		taskbar := 48.0
+		taskbar := 48
 		if platformVersion == "10.0.0" {
 			taskbar = 40
 		}
-		g.AvailHeight = s.Height - int(math.Round(taskbar/s.DPR))
+		g.AvailHeight = s.Height - taskbar
 	}
 	g.OuterWidth, g.OuterHeight = g.AvailWidth, g.AvailHeight
 	g.InnerWidth, g.InnerHeight = g.AvailWidth, g.AvailHeight-browserUIHeight
