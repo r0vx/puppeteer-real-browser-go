@@ -7,10 +7,13 @@ import (
 	"fmt"
 	"math/rand"
 	"net/http"
+	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/chromedp/cdproto/fetch"
 	"github.com/gorilla/websocket"
 )
 
@@ -583,6 +586,10 @@ type CustomCDPPage struct {
 	fetchSubscribed bool                                                                     // Fetch.requestPaused 是否已订阅（防止重复订阅导致双重 continue）
 	pausedHandler   func(requestID, url, method, postData string, headers map[string]string) // 直接 API 处理器
 	requestHandler  RequestHandler                                                           // Page 接口处理器
+	proxyAuth       bool                                                                     // 代理需要账号密码：Fetch 始终拦截全部请求以接管 407
+	userFetchOn     bool                                                                     // 调用方是否开启了拦截（EnableFetch / SetRequestInterception）
+	userPatterns    []string                                                                 // 调用方的 urlPattern
+	userMatchers    []*regexp.Regexp                                                         // proxyAuth 时 Chrome 拦截全部请求，用它在本地过滤
 }
 
 // getCursor returns the page's persistent cursor, lazily creating it.
@@ -602,6 +609,12 @@ func (p *CustomCDPPage) initialize() error {
 
 	if err := p.client.EnableDOMDomain(); err != nil {
 		return fmt.Errorf("failed to enable DOM domain: %w", err)
+	}
+
+	if p.opts != nil && p.opts.Proxy != nil && p.opts.Proxy.Username != "" {
+		if err := p.setupProxyAuth(); err != nil {
+			return fmt.Errorf("failed to set up proxy auth: %w", err)
+		}
 	}
 
 	// CRITICAL: Inject stealth script on new document WITHOUT Runtime.Enable
@@ -1013,8 +1026,16 @@ func (p *CustomCDPPage) ensureFetchSubscription() {
 		p.fetchMu.Lock()
 		paused := p.pausedHandler
 		reqHandler := p.requestHandler
+		// 代理认证模式下 Chrome 拦截全部请求，只有命中调用方 patterns 的才交给处理器
+		intercept := p.userFetchOn && (!p.proxyAuth || slices.ContainsFunc(p.userMatchers, func(re *regexp.Regexp) bool {
+			return re.MatchString(r.URL)
+		}))
 		p.fetchMu.Unlock()
 
+		if !intercept {
+			p.ContinueRequest(data.RequestID, "")
+			return
+		}
 		// 直接 API 优先：调用方自行决定 continue/fulfill/fail
 		if paused != nil {
 			paused(data.RequestID, r.URL, r.Method, r.PostData, r.Headers)
@@ -1416,20 +1437,113 @@ func (p *CustomCDPPage) GetResponseBody(requestID string) ([]byte, error) {
 // EnableFetch enables fetch domain for request interception
 // patterns: URL patterns to intercept, e.g. ["*diamond_buy*", "*api/pay*"]
 func (p *CustomCDPPage) EnableFetch(patterns []string) error {
-	urlPatterns := make([]map[string]string, len(patterns))
-	for i, pattern := range patterns {
-		urlPatterns[i] = map[string]string{"urlPattern": pattern}
+	matchers := make([]*regexp.Regexp, 0, len(patterns))
+	for _, pattern := range patterns {
+		re, err := urlPatternRegexp(pattern)
+		if err != nil {
+			return fmt.Errorf("invalid url pattern %q: %w", pattern, err)
+		}
+		matchers = append(matchers, re)
 	}
-	_, err := p.client.sendCommand("Fetch.enable", map[string]interface{}{
-		"patterns": urlPatterns,
-	})
+
+	p.fetchMu.Lock()
+	p.userFetchOn = true
+	p.userPatterns = patterns
+	p.userMatchers = matchers
+	p.fetchMu.Unlock()
+	// 没有处理器时也要有分发器兜底放行，否则命中的请求会一直挂起
+	p.ensureFetchSubscription()
+	return p.applyFetch()
+}
+
+// DisableFetch disables fetch domain（配置了代理认证时仍保留拦截以应答 407，请求会被直接放行）
+func (p *CustomCDPPage) DisableFetch() error {
+	p.fetchMu.Lock()
+	p.userFetchOn = false
+	p.userPatterns = nil
+	p.userMatchers = nil
+	p.fetchMu.Unlock()
+	return p.applyFetch()
+}
+
+// applyFetch 按当前状态下发 Fetch 配置：Fetch.enable 会整体覆盖之前的配置，
+// 代理认证与调用方拦截必须合并成一次下发
+func (p *CustomCDPPage) applyFetch() error {
+	p.fetchMu.Lock()
+	proxyAuth, userOn, patterns := p.proxyAuth, p.userFetchOn, p.userPatterns
+	p.fetchMu.Unlock()
+
+	var err error
+	switch {
+	case proxyAuth:
+		// handleAuthRequests 只对被拦截的请求生效，所以拦截全部请求
+		_, err = p.client.sendCommand("Fetch.enable", map[string]interface{}{
+			"handleAuthRequests": true,
+			"patterns":           []map[string]string{{"urlPattern": "*"}},
+		})
+	case userOn:
+		urlPatterns := make([]map[string]string, len(patterns))
+		for i, pattern := range patterns {
+			urlPatterns[i] = map[string]string{"urlPattern": pattern}
+		}
+		_, err = p.client.sendCommand("Fetch.enable", map[string]interface{}{"patterns": urlPatterns})
+	default:
+		_, err = p.client.sendCommand("Fetch.disable", nil)
+	}
 	return err
 }
 
-// DisableFetch disables fetch domain
-func (p *CustomCDPPage) DisableFetch() error {
-	_, err := p.client.sendCommand("Fetch.disable", nil)
-	return err
+// setupProxyAuth 接管代理 407：拦截全部请求，未开启调用方拦截时由分发器直接放行
+func (p *CustomCDPPage) setupProxyAuth() error {
+	p.fetchMu.Lock()
+	p.proxyAuth = true
+	p.fetchMu.Unlock()
+
+	proxy := p.opts.Proxy
+	p.client.OnEvent("Fetch.authRequired", func(params json.RawMessage) {
+		var data struct {
+			RequestID     string `json:"requestId"`
+			AuthChallenge struct {
+				Source string `json:"source"`
+			} `json:"authChallenge"`
+		}
+		if json.Unmarshal(params, &data) != nil {
+			return
+		}
+		// 与 CDPPage 相同：只对代理质询提供代理凭据
+		resp := proxyAuthResponse(proxy, &fetch.AuthChallenge{Source: fetch.AuthChallengeSource(data.AuthChallenge.Source)})
+		p.client.sendCommand("Fetch.continueWithAuth", map[string]interface{}{
+			"requestId":             data.RequestID,
+			"authChallengeResponse": resp,
+		})
+	})
+	p.ensureFetchSubscription()
+	return p.applyFetch()
+}
+
+// urlPatternRegexp 把 Fetch urlPattern（* 任意串、? 单个字符、\ 转义）转换为匹配整条 URL 的正则
+func urlPatternRegexp(pattern string) (*regexp.Regexp, error) {
+	var b strings.Builder
+	b.WriteString(`^(?s)`)
+	for i := 0; i < len(pattern); i++ {
+		switch c := pattern[i]; c {
+		case '*':
+			b.WriteString(`.*`)
+		case '?':
+			b.WriteString(`.`)
+		case '\\':
+			if i+1 < len(pattern) {
+				i++
+				b.WriteString(regexp.QuoteMeta(pattern[i : i+1]))
+			} else {
+				b.WriteString(`\\`)
+			}
+		default:
+			b.WriteString(regexp.QuoteMeta(pattern[i : i+1]))
+		}
+	}
+	b.WriteString(`$`)
+	return regexp.Compile(b.String())
 }
 
 // OnRequestPaused subscribes to Fetch.requestPaused events.

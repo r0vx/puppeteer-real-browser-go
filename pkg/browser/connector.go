@@ -57,19 +57,19 @@ func (cc *CDPConnector) Connect(ctx context.Context, chrome *ChromeProcess, opts
 
 // CDPPage implements the Page interface using chromedp
 type CDPPage struct {
-	ctx                   context.Context
-	cancel                context.CancelFunc
-	allocCtx              context.Context
-	allocCancel           context.CancelFunc
-	chrome                *ChromeProcess
-	opts                  *ConnectOptions
-	initialized           bool
-	requestHandler        RequestHandler
-	interceptEnabled      bool
-	targetHandler         *TargetHandler
-	requestListenerCancel context.CancelFunc // 用于取消请求监听器
-	requestListenerMu     sync.Mutex         // 保护监听器操作
-	cursor                *GhostCursor       // 持久化拟人光标，避免每次点击瞬移
+	ctx               context.Context
+	cancel            context.CancelFunc
+	allocCtx          context.Context
+	allocCancel       context.CancelFunc
+	chrome            *ChromeProcess
+	opts              *ConnectOptions
+	initialized       bool
+	requestHandler    RequestHandler
+	interceptEnabled  bool
+	targetHandler     *TargetHandler
+	fetchListening    bool         // Fetch 事件分发器是否已注册（只注册一次，避免重复放行同一请求）
+	requestListenerMu sync.Mutex   // 保护 requestHandler / interceptEnabled / fetchListening
+	cursor            *GhostCursor // 持久化拟人光标，避免每次点击瞬移
 }
 
 // GetContext 返回 chromedp 上下文（用于直接调用 chromedp 方法）
@@ -440,13 +440,7 @@ func (p *CDPPage) GetURL() (string, error) {
 
 // Close closes the page and cleans up resources
 func (p *CDPPage) Close() error {
-	// 取消请求监听器
-	p.requestListenerMu.Lock()
-	if p.requestListenerCancel != nil {
-		p.requestListenerCancel()
-		p.requestListenerCancel = nil
-	}
-	p.requestListenerMu.Unlock()
+	// Fetch 分发器绑定在 p.ctx 上，随下面的 cancel 一起移除
 
 	// Stop target handler
 	if p.targetHandler != nil {
@@ -522,45 +516,98 @@ func (p *CDPPage) injectStealthScripts() chromedp.Action {
 	})
 }
 
-// setupProxyAuth sets up proxy authentication if configured
-func (p *CDPPage) setupProxyAuth() chromedp.Action {
-	if p.opts.Proxy == nil || p.opts.Proxy.Username == "" {
-		return chromedp.ActionFunc(func(ctx context.Context) error { return nil })
-	}
+// hasProxyAuth reports whether a proxy with credentials is configured
+func (p *CDPPage) hasProxyAuth() bool {
+	return p.opts != nil && p.opts.Proxy != nil && p.opts.Proxy.Username != ""
+}
 
+// setupProxyAuth sets up proxy authentication if configured.
+// handleAuthRequests 只对被 Fetch 拦截的请求生效，所以要拦截全部请求；
+// 暂停的请求由 listenFetch 注册的分发器放行（未开启用户拦截时）
+func (p *CDPPage) setupProxyAuth() chromedp.Action {
 	return chromedp.ActionFunc(func(ctx context.Context) error {
-		// Enable fetch with auth request handling for proxy authentication
-		if err := fetch.Enable().WithHandleAuthRequests(true).Do(ctx); err != nil {
+		if !p.hasProxyAuth() {
+			return nil
+		}
+		p.listenFetch(ctx)
+		if err := enableFetchAll(ctx, true); err != nil {
 			return fmt.Errorf("failed to enable Fetch with auth: %w", err)
 		}
-
-		// Listen for auth required events (proxy authentication challenges)
-		chromedp.ListenTarget(ctx, func(ev interface{}) {
-			if authEv, ok := ev.(*fetch.EventAuthRequired); ok {
-				go p.handleProxyAuth(ctx, authEv)
-			}
-		})
-
 		return nil
 	})
 }
 
-// handleProxyAuth handles proxy authentication challenges
-func (p *CDPPage) handleProxyAuth(ctx context.Context, ev *fetch.EventAuthRequired) {
-	if p.opts.Proxy == nil || p.opts.Proxy.Username == "" {
-		// No credentials, cancel the auth
-		fetch.ContinueWithAuth(ev.RequestID, &fetch.AuthChallengeResponse{
-			Response: fetch.AuthChallengeResponseResponseCancelAuth,
-		}).Do(ctx)
+// enableFetchAll 拦截全部请求；handleAuth 为 true 时同时接管认证质询
+func enableFetchAll(ctx context.Context, handleAuth bool) error {
+	return fetch.Enable().
+		WithHandleAuthRequests(handleAuth).
+		WithPatterns([]*fetch.RequestPattern{{URLPattern: "*"}}).
+		Do(ctx)
+}
+
+// proxyAuthResponse 只对代理发起的质询提供代理凭据；目标站自己的 HTTP 认证交给浏览器默认处理，
+// 否则任何返回 401 的网站都能拿到代理账号密码
+func proxyAuthResponse(proxy *ProxyConfig, challenge *fetch.AuthChallenge) *fetch.AuthChallengeResponse {
+	if proxy == nil || proxy.Username == "" || challenge == nil || challenge.Source != fetch.AuthChallengeSourceProxy {
+		return &fetch.AuthChallengeResponse{Response: fetch.AuthChallengeResponseResponseDefault}
+	}
+	return &fetch.AuthChallengeResponse{
+		Response: fetch.AuthChallengeResponseResponseProvideCredentials,
+		Username: proxy.Username,
+		Password: proxy.Password,
+	}
+}
+
+// listenFetch 注册唯一的 Fetch 事件分发器。ctx 须带 chromedp 执行器且与页面同生命周期
+func (p *CDPPage) listenFetch(ctx context.Context) {
+	p.requestListenerMu.Lock()
+	defer p.requestListenerMu.Unlock()
+	if p.fetchListening {
+		return
+	}
+	p.fetchListening = true
+
+	chromedp.ListenTarget(ctx, func(ev interface{}) {
+		// 监听回调在 chromedp 事件循环里同步执行，发命令必须另起 goroutine
+		switch e := ev.(type) {
+		case *fetch.EventRequestPaused:
+			go p.handleRequestPaused(ctx, e)
+		case *fetch.EventAuthRequired:
+			go fetch.ContinueWithAuth(e.RequestID, proxyAuthResponse(p.opts.Proxy, e.AuthChallenge)).Do(ctx)
+		}
+	})
+}
+
+// handleRequestPaused 开启拦截且设置了处理器时交给处理器，否则直接放行（代理认证模式下拦截全部请求）
+func (p *CDPPage) handleRequestPaused(ctx context.Context, e *fetch.EventRequestPaused) {
+	p.requestListenerMu.Lock()
+	handler := p.requestHandler
+	intercept := p.interceptEnabled
+	p.requestListenerMu.Unlock()
+
+	if !intercept || handler == nil {
+		fetch.ContinueRequest(e.RequestID).Do(ctx)
 		return
 	}
 
-	// Provide credentials for proxy authentication
-	fetch.ContinueWithAuth(ev.RequestID, &fetch.AuthChallengeResponse{
-		Response: fetch.AuthChallengeResponseResponseProvideCredentials,
-		Username: p.opts.Proxy.Username,
-		Password: p.opts.Proxy.Password,
-	}).Do(ctx)
+	req := &InterceptedRequest{
+		URL:          e.Request.URL,
+		Method:       e.Request.Method,
+		Headers:      make(map[string]string),
+		ResourceType: string(e.ResourceType),
+		RequestID:    string(e.RequestID),
+	}
+	for name, value := range e.Request.Headers {
+		if str, ok := value.(string); ok {
+			req.Headers[name] = str
+		}
+	}
+	req.setPageContext(p)
+
+	// 处理器出错时放行，避免请求挂起
+	if err := handler(req); err != nil {
+		fetch.ContinueRequest(e.RequestID).Do(ctx)
+	}
 }
 
 // setupViewport configures the viewport
@@ -594,95 +641,35 @@ func (p *CDPPage) setupAdditionalStealth() chromedp.Action {
 // SetRequestInterception enables or disables request interception
 func (p *CDPPage) SetRequestInterception(enabled bool) error {
 	p.requestListenerMu.Lock()
-	defer p.requestListenerMu.Unlock()
-
-	// 先取消旧的监听器（如果存在）
-	if p.requestListenerCancel != nil {
-		p.requestListenerCancel()
-		p.requestListenerCancel = nil
-	}
-
 	p.interceptEnabled = enabled
+	p.requestListenerMu.Unlock()
 
-	if enabled {
-		// 创建专用 context 用于监听器
-		listenerCtx, cancel := context.WithCancel(p.ctx)
-		p.requestListenerCancel = cancel
-
-		// Enable both Network and Fetch domains for comprehensive request interception
-		return chromedp.Run(p.ctx, chromedp.ActionFunc(func(ctx context.Context) error {
-			// Enable Network domain first
-			if err := network.Enable().Do(ctx); err != nil {
-				return fmt.Errorf("failed to enable Network domain: %w", err)
+	return chromedp.Run(p.ctx, chromedp.ActionFunc(func(ctx context.Context) error {
+		if !enabled {
+			// 代理认证依赖 Fetch 拦截：保持开启，分发器会直接放行
+			if p.hasProxyAuth() {
+				return nil
 			}
-
-			// Enable fetch domain with request patterns - intercept everything
-			patterns := []*fetch.RequestPattern{{
-				URLPattern: "*",
-			}}
-			if err := fetch.Enable().WithHandleAuthRequests(false).WithPatterns(patterns).Do(ctx); err != nil {
-				return fmt.Errorf("failed to enable Fetch domain: %w", err)
-			}
-
-			// Set up request interception listener（使用专用 context）
-			chromedp.ListenTarget(listenerCtx, func(ev interface{}) {
-				switch e := ev.(type) {
-				case *fetch.EventRequestPaused:
-					// Handle in a goroutine to avoid blocking
-					go func() {
-						// 检查 listenerCtx 是否已取消
-						select {
-						case <-listenerCtx.Done():
-							return
-						default:
-						}
-
-						if p.requestHandler != nil {
-							// Create InterceptedRequest
-							req := &InterceptedRequest{
-								URL:          e.Request.URL,
-								Method:       e.Request.Method,
-								Headers:      make(map[string]string),
-								ResourceType: string(e.ResourceType),
-								RequestID:    string(e.RequestID),
-							}
-
-							// Convert headers
-							for name, value := range e.Request.Headers {
-								if str, ok := value.(string); ok {
-									req.Headers[name] = str
-								}
-							}
-
-							// Set page context for request operations
-							req.setPageContext(p)
-
-							// Call handler
-							if err := p.requestHandler(req); err != nil {
-								// If handler fails, continue the request
-								fetch.ContinueRequest(e.RequestID).Do(ctx)
-							}
-						} else {
-							// No handler, continue request
-							fetch.ContinueRequest(e.RequestID).Do(ctx)
-						}
-					}()
-				}
-			})
-
-			return nil
-		}))
-	} else {
-		// Disable fetch domain
-		return chromedp.Run(p.ctx, chromedp.ActionFunc(func(ctx context.Context) error {
 			return fetch.Disable().Do(ctx)
-		}))
-	}
+		}
+
+		if err := network.Enable().Do(ctx); err != nil {
+			return fmt.Errorf("failed to enable Network domain: %w", err)
+		}
+		p.listenFetch(ctx)
+		// 重新 enable 会覆盖之前的配置，必须保留代理认证
+		if err := enableFetchAll(ctx, p.hasProxyAuth()); err != nil {
+			return fmt.Errorf("failed to enable Fetch domain: %w", err)
+		}
+		return nil
+	}))
 }
 
 // OnRequest sets the request handler for intercepted requests
 func (p *CDPPage) OnRequest(handler RequestHandler) error {
+	p.requestListenerMu.Lock()
 	p.requestHandler = handler
+	p.requestListenerMu.Unlock()
 	return nil
 }
 
