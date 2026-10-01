@@ -2,7 +2,9 @@ package browser
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -83,13 +85,22 @@ func (ufm *UserFingerprintManager) GetOrCreateUserFingerprint(userID string, ini
 	
 	// 从文件加载；旧格式或不自洽的指纹在这里规范化并回写。损坏的文件直接报错，绝不覆盖
 	configPath := ufm.getUserConfigPath(userID)
-	if _, err := os.Stat(configPath); err == nil {
-		config, err := LoadFingerprintConfigFile(configPath)
-		if err != nil {
-			return nil, fmt.Errorf("load fingerprint %s: %w", userID, err)
+	raw, err := os.ReadFile(configPath)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return nil, fmt.Errorf("load fingerprint %s: %w", userID, err) // 存在但读不了：报错，不能当新账号覆盖
+	}
+	if err == nil {
+		config := &FingerprintConfig{}
+		if err := json.Unmarshal(raw, config); err != nil {
+			return nil, fmt.Errorf("load fingerprint %s: parse %s: %w", userID, configPath, err)
 		}
 		if config.Normalize() {
-			if err := ufm.saveConfigToFile(config, configPath); err != nil {
+			// 合并回原内容再写：规格要求不认识的旧字段保留不删
+			merged, err := mergeFingerprintJSON(raw, config)
+			if err != nil {
+				return nil, fmt.Errorf("save normalized fingerprint %s: %w", userID, err)
+			}
+			if err := os.WriteFile(configPath, merged, 0o644); err != nil {
 				return nil, fmt.Errorf("save normalized fingerprint %s: %w", userID, err)
 			}
 		}

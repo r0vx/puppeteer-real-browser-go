@@ -718,6 +718,39 @@ func LoadFingerprintConfigFile(path string) (*FingerprintConfig, error) {
 	return &c, nil
 }
 
+// mergeFingerprintJSON 把规范化后的配置合并回原文件内容：已知字段取新值，本库不认识的字段（含嵌套对象里的）原样保留
+func mergeFingerprintJSON(raw []byte, config *FingerprintConfig) ([]byte, error) {
+	updated, err := json.Marshal(config)
+	if err != nil {
+		return nil, fmt.Errorf("marshal fingerprint: %w", err)
+	}
+	var base, over any
+	for _, v := range []struct {
+		data []byte
+		into *any
+	}{{raw, &base}, {updated, &over}} {
+		dec := json.NewDecoder(bytes.NewReader(v.data))
+		dec.UseNumber() // 保留原文件里大整数的精度
+		if err := dec.Decode(v.into); err != nil {
+			return nil, fmt.Errorf("decode fingerprint json: %w", err)
+		}
+	}
+	return json.MarshalIndent(mergeJSONValue(base, over), "", "  ")
+}
+
+// mergeJSONValue 递归合并：两边都是对象时逐键合并，否则取 over
+func mergeJSONValue(base, over any) any {
+	b, ok := base.(map[string]any)
+	o, ok2 := over.(map[string]any)
+	if !ok || !ok2 {
+		return over
+	}
+	for k, v := range o {
+		b[k] = mergeJSONValue(b[k], v)
+	}
+	return b
+}
+
 // generateFingerprintFor 生成指定系统的新指纹；身份字段由 Normalize 按用户 ID 确定性补齐，
 // 与身份无关的字段（旧注入脚本、网络指纹代理在用）沿用原生成器，同样按用户 ID 确定
 func generateFingerprintFor(userID string, osf OSFamily) *FingerprintConfig {

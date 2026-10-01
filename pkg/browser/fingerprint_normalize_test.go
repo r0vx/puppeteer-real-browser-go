@@ -207,6 +207,43 @@ func TestFingerprintManagerNormalizesAndBindsUA(t *testing.T) {
 		t.Errorf("normalized config not written back: schema %d platform %q", reread.SchemaVersion, reread.Browser.Platform)
 	}
 
+	// 本库不认识的字段（顶层与嵌套对象里的）在规范化回写后原样保留
+	extra := map[string]any{}
+	json.Unmarshal(data, &extra)
+	extra["custom_note"] = "keep me"
+	extra["browser"].(map[string]any)["extra_field"] = 7
+	data, _ = json.Marshal(extra)
+	extraPath := filepath.Join(dir, "old-extra.json")
+	if err := os.WriteFile(extraPath, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.GetOrCreateUserFingerprint("old-extra", nil); err != nil {
+		t.Fatal(err)
+	}
+	written := map[string]any{}
+	if b, err := os.ReadFile(extraPath); err != nil || json.Unmarshal(b, &written) != nil {
+		t.Fatalf("read back %s: %v", extraPath, err)
+	}
+	browserObj, _ := written["browser"].(map[string]any)
+	if written["custom_note"] != "keep me" || browserObj["extra_field"] != float64(7) || browserObj["platform"] != "Win32" {
+		t.Errorf("write-back lost unknown fields or normalization: custom_note=%v extra_field=%v platform=%v", written["custom_note"], browserObj["extra_field"], browserObj["platform"])
+	}
+
+	// 存在但读不了的文件：报错，不能当成新账号覆盖（root 能读任何文件，跳过）
+	if os.Geteuid() != 0 {
+		lockedPath := filepath.Join(dir, "locked.json")
+		if err := os.WriteFile(lockedPath, data, 0o200); err != nil { // 可写不可读：最能暴露"读失败就当新账号覆盖"
+			t.Fatal(err)
+		}
+		if _, err := m.GetOrCreateUserFingerprint("locked", nil); err == nil {
+			t.Error("unreadable fingerprint file must return an error")
+		}
+		os.Chmod(lockedPath, 0o644)
+		if b, _ := os.ReadFile(lockedPath); string(b) != string(data) {
+			t.Error("unreadable fingerprint file was overwritten")
+		}
+	}
+
 	if err := os.WriteFile(filepath.Join(dir, "broken.json"), []byte("{not json"), 0o644); err != nil {
 		t.Fatal(err)
 	}
