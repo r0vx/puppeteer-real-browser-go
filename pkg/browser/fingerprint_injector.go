@@ -18,6 +18,8 @@ type FingerprintInjector struct {
 }
 
 // NewFingerprintInjector 创建指纹注入器
+//
+// Deprecated: Connect 不再使用；身份改由 CDP 下发（见 identity.go），保留仅为兼容。
 func NewFingerprintInjector(config *FingerprintConfig) *FingerprintInjector {
 	return &FingerprintInjector{
 		config:             config,

@@ -17,6 +17,8 @@ type EnhancedAudioWebGLInjector struct {
 }
 
 // NewEnhancedAudioWebGLInjector 创建增强版注入器
+//
+// Deprecated: Connect 不再使用；身份改由 CDP 下发（见 identity.go），保留仅为兼容。
 func NewEnhancedAudioWebGLInjector(config *FingerprintConfig) *EnhancedAudioWebGLInjector {
 	// 生成用户特定的哈希和种子
 	userHash := generateUserHash(config.UserID)

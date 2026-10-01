@@ -8,6 +8,8 @@ import (
 
 // GetAdvancedStealthScript returns an advanced anti-detection script
 // Based on rebrowser-patches and other anti-detection techniques
+//
+// Deprecated: Connect 不再使用；身份改由 CDP 下发（见 identity.go），保留仅为兼容。
 func GetAdvancedStealthScript() string {
 	return `
 		// Advanced anti-detection script for Go puppeteer-real-browser
@@ -634,6 +636,8 @@ func GetAdvancedStealthScript() string {
 }
 
 // InjectAdvancedStealthScripts injects comprehensive anti-detection scripts
+//
+// Deprecated: Connect 不再使用；身份改由 CDP 下发（见 identity.go），保留仅为兼容。
 func InjectAdvancedStealthScripts() chromedp.Action {
 	return chromedp.ActionFunc(func(ctx context.Context) error {
 		script := GetAdvancedStealthScript()
@@ -642,6 +646,8 @@ func InjectAdvancedStealthScripts() chromedp.Action {
 }
 
 // InjectStealthOnNewDocument injects stealth scripts on every new document
+//
+// Deprecated: Connect 不再使用；身份改由 CDP 下发（见 identity.go），保留仅为兼容。
 func InjectStealthOnNewDocument() chromedp.Action {
 	return chromedp.ActionFunc(func(ctx context.Context) error {
 		script := GetAdvancedStealthScript()
@@ -652,6 +658,8 @@ func InjectStealthOnNewDocument() chromedp.Action {
 
 // GetStealthScriptWithConfig generates stealth script with custom fingerprint configuration
 // 使用自定义指纹配置生成 stealth 脚本
+//
+// Deprecated: Connect 不再使用；身份改由 CDP 下发（见 identity.go），保留仅为兼容。
 func GetStealthScriptWithConfig(config *FingerprintConfig) string {
 	if config == nil {
 		return GetAdvancedStealthScript()
@@ -670,6 +678,8 @@ func GetStealthScriptWithConfig(config *FingerprintConfig) string {
 
 // GetBaseStealthScript returns the base stealth script without fingerprint randomization
 // 返回不包含指纹随机化的基础 stealth 脚本（用于自定义指纹时）
+//
+// Deprecated: Connect 不再使用；身份改由 CDP 下发（见 identity.go），保留仅为兼容。
 func GetBaseStealthScript() string {
 	return `
 		// Base anti-detection script (without fingerprint randomization)

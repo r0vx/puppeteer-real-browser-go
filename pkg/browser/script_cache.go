@@ -170,6 +170,8 @@ func (sc *ScriptCache) Clear() {
 
 // GetCachedAdvancedStealthScript 获取缓存的高级 stealth 脚本
 // 只在首次调用时生成，之后直接返回缓存
+//
+// Deprecated: Connect 不再使用；身份改由 CDP 下发（见 identity.go），保留仅为兼容。
 func GetCachedAdvancedStealthScript() string {
 	advancedStealthScriptOnce.Do(func() {
 		advancedStealthScript = generateAdvancedStealthScript()
@@ -178,6 +180,8 @@ func GetCachedAdvancedStealthScript() string {
 }
 
 // GetCachedSimpleStealthScript 获取缓存的简单 stealth 脚本
+//
+// Deprecated: Connect 不再使用；身份改由 CDP 下发（见 identity.go），保留仅为兼容。
 func GetCachedSimpleStealthScript() string {
 	simpleStealthScriptOnce.Do(func() {
 		simpleStealthScript = generateSimpleStealthScript()
@@ -186,6 +190,8 @@ func GetCachedSimpleStealthScript() string {
 }
 
 // GetCachedBaseStealthScript 获取缓存的基础 stealth 脚本
+//
+// Deprecated: Connect 不再使用；身份改由 CDP 下发（见 identity.go），保留仅为兼容。
 func GetCachedBaseStealthScript() string {
 	baseStealthScriptOnce.Do(func() {
 		baseStealthScript = generateBaseStealthScript()
@@ -195,6 +201,8 @@ func GetCachedBaseStealthScript() string {
 
 // GetCachedStealthScriptWithConfig 获取基于配置的缓存脚本
 // 使用 userID 作为缓存键
+//
+// Deprecated: Connect 不再使用；身份改由 CDP 下发（见 identity.go），保留仅为兼容。
 func GetCachedStealthScriptWithConfig(config *FingerprintConfig) string {
 	if config == nil {
 		return GetCachedAdvancedStealthScript()

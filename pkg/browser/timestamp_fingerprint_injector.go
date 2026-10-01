@@ -18,6 +18,8 @@ type TimestampFingerprintInjector struct {
 }
 
 // NewTimestampFingerprintInjector 创建时间戳指纹注入器
+//
+// Deprecated: Connect 不再使用；身份改由 CDP 下发（见 identity.go），保留仅为兼容。
 func NewTimestampFingerprintInjector(config *FingerprintConfig) *TimestampFingerprintInjector {
 	userHash := generateTimestampHash(config.UserID)
 
