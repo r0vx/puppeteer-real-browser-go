@@ -1,20 +1,24 @@
+//go:build linux
 // +build linux
 
 package browser
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
 // XvfbManager manages Xvfb virtual display sessions
 type XvfbManager struct {
 	cmd        *exec.Cmd
+	exited     chan struct{} // Xvfb 退出且已被 Wait 回收时关闭
 	display    string
 	displayNum int
 	isRunning  bool
@@ -53,7 +57,10 @@ func (xm *XvfbManager) Start() error {
 	}
 
 	xm.cmd = exec.Command("Xvfb", args...)
-	
+	// DISPLAY 是进程级共享的，Xvfb 随宿主进程存活；宿主退出（含未调用 Stop）时由内核发 SIGTERM，避免残留。
+	// ponytail: Pdeathsig 绑定创建它的 OS 线程，Go 运行时一般不退出线程；若出现残留改为宿主侧显式 Stop
+	xm.cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGTERM}
+
 	// Redirect stderr to /dev/null for silent mode
 	xm.cmd.Stderr = nil
 	xm.cmd.Stdout = nil
@@ -62,12 +69,20 @@ func (xm *XvfbManager) Start() error {
 		return fmt.Errorf("failed to start Xvfb: %w. Install with: sudo apt-get install xvfb", err)
 	}
 
-	// Wait a bit for Xvfb to start
-	time.Sleep(500 * time.Millisecond)
+	// 后台 Wait 回收进程，exited 关闭即表示已退出。
+	// 不能用 signal 0 判活：未回收的僵尸进程同样收信号成功
+	exited := make(chan struct{})
+	go func(cmd *exec.Cmd) {
+		cmd.Wait()
+		close(exited)
+	}(xm.cmd)
+	xm.exited = exited
 
-	// Check if Xvfb is running
-	if !xm.isXvfbRunning() {
-		return fmt.Errorf("Xvfb failed to start properly")
+	// 启动窗口内退出（显示号被占用、参数错误等）视为失败
+	select {
+	case <-exited:
+		return fmt.Errorf("Xvfb failed to start properly: exited during startup")
+	case <-time.After(500 * time.Millisecond):
 	}
 
 	// Set DISPLAY environment variable
@@ -87,10 +102,10 @@ func (xm *XvfbManager) Stop() error {
 	}
 
 	if xm.cmd != nil && xm.cmd.Process != nil {
-		if err := xm.cmd.Process.Kill(); err != nil {
+		if err := xm.cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
 			return fmt.Errorf("failed to stop Xvfb: %w", err)
 		}
-		xm.cmd.Wait()
+		<-xm.exited
 	}
 
 	// Clean up lock file
@@ -124,17 +139,6 @@ func (xm *XvfbManager) findAvailableDisplay() (int, error) {
 		}
 	}
 	return 0, fmt.Errorf("no available display number found")
-}
-
-// isXvfbRunning checks if the Xvfb process is still running
-func (xm *XvfbManager) isXvfbRunning() bool {
-	if xm.cmd == nil || xm.cmd.Process == nil {
-		return false
-	}
-
-	// Check if process is running by sending signal 0
-	err := xm.cmd.Process.Signal(os.Signal(nil))
-	return err == nil
 }
 
 // IsXvfbInstalled checks if Xvfb is installed on the system
@@ -176,7 +180,7 @@ func GetXvfbWarningMessage() string {
 // RunWithXvfb runs a function with Xvfb display set up
 func RunWithXvfb(fn func() error) error {
 	xvfb := NewXvfbManager()
-	
+
 	if err := xvfb.Start(); err != nil {
 		// Print warning but continue without Xvfb
 		fmt.Println(GetXvfbWarningMessage())
@@ -196,4 +200,3 @@ func parseDisplay(display string) (int, error) {
 	}
 	return 0, fmt.Errorf("invalid display format: %s", display)
 }
-
