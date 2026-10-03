@@ -93,12 +93,12 @@ for (const w of [G.parent, G.opener]) {
     }
   } catch (e) {}
 }
-const toStringProxy = new Proxy(nativeToString, {
-  apply(target, self, args) {
-    if (self === C.key) return masks;
-    return masks.has(self) ? masks.get(self) : Reflect.apply(target, self, args);
-  },
-});
+// 替换后的 toString 用方法写法：和原生一样不可 new、没有 prototype。不用 Proxy：Proxy 会被原型循环检查
+// （CreepJS 的 too much recursion / reflect set proto）和报错调用栈识破
+const toStringProxy = {toString() {
+  if (this === C.key) return masks;
+  return masks.has(this) ? masks.get(this) : Reflect.apply(nativeToString, this, []);
+}}.toString;
 masks.set(toStringProxy, Reflect.apply(nativeToString, nativeToString, []));
 Object.defineProperty(Function.prototype, 'toString', {value: toStringProxy});
 const disguise = (fake, original) => {

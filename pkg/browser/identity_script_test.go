@@ -119,6 +119,12 @@ func TestIdentityScript(t *testing.T) {
 			"function getParameter() { [native code] }|function get availHeight() { [native code] }|function toString() { [native code] }|function toDataURL() { [native code] }|function toString() { [native code] }"},
 		// 对 toString 传入任意非函数 this 时仍按原生抛 TypeError（共享伪装表的口令猜不到）
 		{"toString on string throws", `(() => { try { Function.prototype.toString.call(''); return 'no throw'; } catch (e) { return e.constructor.name; } })()`, "TypeError"},
+		// CreepJS 识别 Proxy 版 toString 的三条检测（failed at too much recursion / reflect set proto / object toString error）
+		{"toString cyclic proto throws TypeError", `(() => { const f = Function.prototype.toString, p = Object.getPrototypeOf(f);
+		  try { Object.setPrototypeOf(f, Object.create(f)).toString(); return 'no throw'; } catch (e) { return e.constructor.name; } finally { Object.setPrototypeOf(f, p); } })()`, "TypeError"},
+		{"toString reflect cyclic proto refused", `(() => { const f = Function.prototype.toString, p = Object.getPrototypeOf(f);
+		  try { return Reflect.setPrototypeOf(f, Object.create(f)); } finally { Object.setPrototypeOf(f, p); } })()`, false},
+		{"toString error stack starts at native frame", `(() => { try { Object.create(Function.prototype.toString).toString(); return 'no throw'; } catch (e) { return /at Function\.toString /.test(e.stack.split('\n')[1]); } })()`, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
