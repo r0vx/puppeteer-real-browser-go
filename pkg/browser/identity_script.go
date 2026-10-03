@@ -233,6 +233,52 @@ if (C.seed && G.HTMLCanvasElement) {
   patchMethod(HTMLCanvasElement.prototype, 'toDataURL', (orig, self, args) => exportNoisy(self, orig, args));
   patchMethod(HTMLCanvasElement.prototype, 'toBlob', (orig, self, args) => exportNoisy(self, orig, args));
 }
+if (G.Navigator && G.isSecureContext && /^(Win32|MacIntel)$/.test(C.platform) && !('share' in Navigator.prototype)) {
+  // Linux 版 Chrome 没有 Web Share，Windows / Mac 版有（CreepJS 的 noWebShare）：按真实 Chrome 的行为补上
+  const N = Navigator.prototype;
+  const receiverCheck = Object.getOwnPropertyDescriptor(N, 'userAgent').get; // this 不是 Navigator 时和原生一样抛 Illegal invocation
+  let allowed = G === G.top;
+  if (!allowed) {
+    try { allowed = !!G.top.location.href; } catch (e) {} // 跨域 iframe 默认没有 web-share 权限
+  }
+  const baseURL = G.location.href;
+  const shareable = (data) => {
+    if (data === null || typeof data !== 'object') return false;
+    const has = data.title !== undefined || data.text !== undefined || data.url !== undefined || !!(data.files && data.files.length);
+    if (!has) return false;
+    if (data.url !== undefined) {
+      try { new URL(String(data.url), baseURL); } catch (e) { return false; }
+    }
+    return true;
+  };
+  let pending = false;
+  const addMethod = (name, fn) => {
+    masks.set(fn, 'function ' + name + '() { [native code] }');
+    Object.defineProperty(N, name, {value: fn, writable: true, enumerable: true, configurable: true});
+  };
+  addMethod('canShare', {canShare() {
+    Reflect.apply(receiverCheck, this, []);
+    return allowed && shareable(arguments[0]);
+  }}.canShare);
+  // 检查顺序与 Chrome 一致：接收者、权限、数据、进行中的分享、用户手势；有手势时当作用户关掉了分享框
+  addMethod('share', {share() {
+    try { Reflect.apply(receiverCheck, this, []); } catch (e) { return Promise.reject(e); }
+    if (!allowed) return Promise.reject(new DOMException('Permission denied', 'NotAllowedError'));
+    if (!shareable(arguments[0])) {
+      return Promise.reject(new TypeError('No known share data fields supplied. If using only new fields (other than title, text and url), you must feature-detect them first.'));
+    }
+    if (pending) return Promise.reject(new DOMException('An earlier share has not yet completed.', 'InvalidStateError'));
+    const activation = G.navigator.userActivation;
+    if (!(activation && activation.isActive)) {
+      return Promise.reject(new DOMException('Must be handling a user gesture to perform a share request.', 'NotAllowedError'));
+    }
+    pending = true;
+    return new Promise((resolve, reject) => setTimeout(() => {
+      pending = false;
+      reject(new DOMException('Share canceled', 'AbortError'));
+    }, 800));
+  }}.share);
+}
 if (C.seed && G.AudioBuffer) {
   const noised = new WeakSet();
   patchMethod(AudioBuffer.prototype, 'getChannelData', (orig, self, args) => {

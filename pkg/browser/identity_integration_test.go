@@ -205,6 +205,12 @@ func TestIdentityAcrossSurfaces(t *testing.T) {
 
 			// 受信点击的屏幕坐标与窗口几何一致。先关弹窗：被弹窗盖住的标签页是 hidden，输入确认要等约 5 秒（Chrome 原生行为）；
 			// 点击点避开左上角的跨站 iframe，否则事件发给 iframe 而不是主页面
+			// Windows / Mac 版 Chrome 有 Web Share，Linux 版没有：账号身份在 Linux 宿主上也必须有
+			if tc.fpUser != "" {
+				if got, _ := inst.Page().Evaluate(`'share' in navigator && 'canShare' in navigator`); got != true {
+					t.Errorf("Web Share missing for a %s identity", tc.wantUAD)
+				}
+			}
 			// 用弹窗自己的 toString 看本页的替换函数，也必须是原生文本（弹窗经 opener 共用伪装表）
 			if tc.fpUser != "" {
 				const js = `window.__p.Function.prototype.toString.call(HTMLCanvasElement.prototype.toDataURL)`

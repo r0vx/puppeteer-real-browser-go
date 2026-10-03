@@ -146,3 +146,85 @@ func TestIdentityScript(t *testing.T) {
 		t.Errorf("worker navigator = %v, want %v", got, want)
 	}
 }
+
+// TestIdentityScriptWebShare Linux 版 Chrome 没有 Web Share：Windows / Mac 身份要补上 share / canShare，
+// 外观与原生一致（原生 toString、方法属性、不可 new），行为按真实 Chrome（数据校验、无用户手势拒绝、有手势当作用户取消）；
+// 宿主身份（Linux）不补
+func TestIdentityScriptWebShare(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `<title>share</title>`)
+	}))
+	defer srv.Close()
+	// 模拟 Linux：在身份脚本之前删掉原生的 share / canShare
+	const removeShare = `delete Navigator.prototype.share; delete Navigator.prototype.canShare;`
+
+	run := func(t *testing.T, platform string) *CustomCDPClient {
+		chrome, err := NewChromeLauncher().Launch(t.Context(), &ConnectOptions{Headless: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { chrome.Kill() })
+		c, err := NewCustomCDPClient(fmt.Sprintf("http://localhost:%d", chrome.Port))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { c.Close() })
+		if err := c.EnablePageDomain(); err != nil {
+			t.Fatal(err)
+		}
+		id := &Identity{UserAgent: "Mozilla/5.0", Platform: platform, Languages: []string{"zh-CN", "zh"}, HardwareConcurrency: 8}
+		for _, src := range []string{removeShare, identityScript(id, false)} {
+			if _, err := c.sendCommand("Page.addScriptToEvaluateOnNewDocument", map[string]any{"source": src}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		loadPage(t, c, srv.URL+"/")
+		return c
+	}
+
+	t.Run("windows identity on a host without Web Share", func(t *testing.T) {
+		c := run(t, "Win32")
+		cases := []struct {
+			name, js string
+			want     any
+		}{
+			{"present", `typeof navigator.share + ',' + typeof navigator.canShare + ',' + ('share' in navigator)`, "function,function,true"},
+			{"native toString", `[Function.prototype.toString.call(navigator.share), Function.prototype.toString.call(navigator.canShare)].join('|')`,
+				"function share() { [native code] }|function canShare() { [native code] }"},
+			{"method descriptor", `(d => [d.writable, d.enumerable, d.configurable].join())(Object.getOwnPropertyDescriptor(Navigator.prototype, 'share'))`, "true,true,true"},
+			{"function shape", `[navigator.share.name, navigator.share.length, 'prototype' in navigator.share, Object.getOwnPropertyNames(navigator.share).sort().join()].join('|')`, "share|0|false|length,name"},
+			{"not constructible", `(() => { try { new navigator.share(); return 'no throw'; } catch (e) { return e.constructor.name; } })()`, "TypeError"},
+			{"canShare validates data", `[navigator.canShare(), navigator.canShare({}), navigator.canShare({url: 'https://example.com/'}), navigator.canShare({text: 'x'}), navigator.canShare({url: 'http://[bad'})].join()`,
+				"false,false,true,true,false"},
+			{"canShare checks receiver", `(() => { try { navigator.canShare.call({}, {text: 'x'}); return 'no throw'; } catch (e) { return e.constructor.name; } })()`, "TypeError"},
+			{"share rejects bad data first", `navigator.share({}).then(() => 'resolved', e => e.name)`, "TypeError"},
+			{"share needs a user gesture", `navigator.share({url: 'https://example.com/'}).then(() => 'resolved', e => e.name)`, "NotAllowedError"},
+			{"share checks receiver", `navigator.share.call({}, {text: 'x'}).then(() => 'resolved', e => e.name)`, "TypeError"},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				if got := evalValue(t, c, tc.js); got != tc.want {
+					t.Errorf("got %v, want %v", got, tc.want)
+				}
+			})
+		}
+		// 有用户手势时像用户关掉了分享框
+		raw, err := c.sendCommand("Runtime.evaluate", map[string]any{"expression": `navigator.share({text: 'x'}).then(() => 'resolved', e => e.name)`,
+			"awaitPromise": true, "returnByValue": true, "userGesture": true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var res struct{ Result struct{ Value any } }
+		json.Unmarshal(raw, &res)
+		if res.Result.Value != "AbortError" {
+			t.Errorf("share with a user gesture = %v, want AbortError", res.Result.Value)
+		}
+	})
+
+	t.Run("linux host identity stays without Web Share", func(t *testing.T) {
+		c := run(t, "Linux x86_64")
+		if got := evalValue(t, c, `'share' in navigator || 'canShare' in navigator`); got != false {
+			t.Errorf("Web Share added for a Linux identity")
+		}
+	})
+}
