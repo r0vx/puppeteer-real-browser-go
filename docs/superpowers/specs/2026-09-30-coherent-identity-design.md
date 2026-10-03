@@ -92,7 +92,7 @@
 
 **删除**：默认 advanced 脚本和指纹脚本里的其余改写，包括 navigator 各属性、语言、插件、webdriver（原生值已是 false）、`permissions`、`chrome.runtime`、console 过滤、`Function.prototype.toString` 补丁、`createElement` 钩子、Date / `performance` 时间偏移、JS 时区、电池、`connection`、`mediaDevices`、假 `RTCPeerConnection`。
 
-**WebRTC**：不再用假对象。改为启动参数 `--force-webrtc-ip-handling-policy=disable_non_proxied_udp`，在浏览器原生层面阻止绕过代理泄露真实 IP，页面看到的是真实的 `RTCPeerConnection`。
+**WebRTC**：不再用假对象。配置了代理时，启动前把 profile 偏好 `webrtc.ip_handling_policy` 设为 `disable_non_proxied_udp`（与 Chrome 设置里的同一项），在浏览器原生层面阻止绕过代理泄露真实 IP，页面看到的是真实的 `RTCPeerConnection`。（2026-10-03 实测：原定的启动参数 `--force-webrtc-ip-handling-policy` 在 Chrome 154 上不生效，STUN 仍经 UDP 暴露公网 IP，已改为写偏好。）
 
 ### 4.5 已保存指纹的兼容
 

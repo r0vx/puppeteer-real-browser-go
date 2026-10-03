@@ -2,10 +2,13 @@ package browser
 
 import (
 	"encoding/json"
+	"fmt"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -141,23 +144,94 @@ func TestCloseShutsDownGracefully(t *testing.T) {
 	}
 }
 
-// TestWebRTCPolicyFlag 配置代理时启动参数禁止 WebRTC 绕过代理；未配置代理时不加（不影响直连用户的 WebRTC）
-func TestWebRTCPolicyFlag(t *testing.T) {
-	const flag = "--force-webrtc-ip-handling-policy=disable_non_proxied_udp"
-	proxy := &ProxyConfig{Host: "127.0.0.1", Port: "8080"}
-	cases := []struct {
-		name string
-		opts *ConnectOptions
-		want bool
-	}{
-		{"proxy", &ConnectOptions{Proxy: proxy}, true},
-		{"proxy with IgnoreAllFlags", &ConnectOptions{IgnoreAllFlags: true, Proxy: proxy}, true},
-		{"no proxy", &ConnectOptions{}, false},
+// TestWebRTCDoesNotBypassProxy 配置代理后 WebRTC 不能绕过代理走 UDP（STUN 会暴露真实公网 IP）：
+// 一个 ICE 候选都不应出现；不配代理时有本机 host 候选，作为对照证明本测试能看出差别
+func TestWebRTCDoesNotBypassProxy(t *testing.T) {
+	page := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `<title>webrtc</title><script>
+window.__c = []; window.__done = false;
+const pc = new RTCPeerConnection();
+pc.createDataChannel('x');
+pc.onicecandidate = e => { if (e.candidate) window.__c.push(e.candidate.candidate); else window.__done = true; };
+pc.createOffer().then(o => pc.setLocalDescription(o));
+setTimeout(() => window.__done = true, 5000);
+</script>`)
+	}))
+	defer page.Close()
+	// 代理地址只需要是个能连上的端口：测试页在本机回环地址上，Chrome 访问它本来就不走代理
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusBadGateway) }))
+	defer proxy.Close()
+	_, proxyPort, _ := net.SplitHostPort(strings.TrimPrefix(proxy.URL, "http://"))
+
+	for _, withProxy := range []bool{false, true} {
+		opts := &ConnectOptions{Headless: true, UseCustomCDP: true}
+		if withProxy {
+			opts.Proxy = &ProxyConfig{Host: "127.0.0.1", Port: proxyPort}
+		}
+		inst, err := Connect(t.Context(), opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := inst.Page().Navigate(page.URL + "/"); err != nil {
+			inst.Close()
+			t.Fatal(err)
+		}
+		for deadline := time.Now().Add(8 * time.Second); time.Now().Before(deadline); time.Sleep(200 * time.Millisecond) {
+			if done, _ := inst.Page().Evaluate(`window.__done`); done == true {
+				break
+			}
+		}
+		got, _ := inst.Page().Evaluate(`window.__c.join('\n')`)
+		inst.Close()
+		cands, _ := got.(string)
+		if withProxy && cands != "" {
+			t.Errorf("with proxy WebRTC still gathered candidates (bypasses the proxy):\n%s", cands)
+		}
+		if !withProxy && !strings.Contains(cands, "typ host") {
+			t.Errorf("without proxy no host candidate, the check cannot tell the difference: %q", cands)
+		}
 	}
-	for _, tc := range cases {
-		flags := NewChromeLauncher().buildChromeFlags(tc.opts, 9222, t.TempDir())
-		if got := slices.Contains(flags, flag); got != tc.want {
-			t.Errorf("%s: has %s = %v, want %v", tc.name, flag, got, tc.want)
+}
+
+// TestSetWebRTCPolicy 写入 WebRTC 策略：新 profile 直接创建 Preferences；已有 profile 只改 webrtc 段，
+// 其余设置（含大整数）原样保留
+func TestSetWebRTCPolicy(t *testing.T) {
+	fresh := t.TempDir()
+	if err := setWebRTCPolicy(fresh); err != nil {
+		t.Fatalf("fresh profile: %v", err)
+	}
+
+	existing := t.TempDir()
+	os.MkdirAll(filepath.Join(existing, "Default"), 0o755)
+	const old = `{"profile":{"name":"acct","exit_type":"Normal"},"webrtc":{"multiple_routes_enabled":true},"counter":13385920394810294810}`
+	if err := os.WriteFile(filepath.Join(existing, "Default", "Preferences"), []byte(old), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := setWebRTCPolicy(existing); err != nil {
+		t.Fatalf("existing profile: %v", err)
+	}
+
+	for _, dir := range []string{fresh, existing} {
+		data, err := os.ReadFile(filepath.Join(dir, "Default", "Preferences"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var prefs struct {
+			WebRTC struct {
+				Policy         string `json:"ip_handling_policy"`
+				MultipleRoutes *bool  `json:"multiple_routes_enabled"`
+				NonProxiedUDP  *bool  `json:"nonproxied_udp_enabled"`
+			} `json:"webrtc"`
+		}
+		if err := json.Unmarshal(data, &prefs); err != nil {
+			t.Fatalf("parse %s: %v", dir, err)
+		}
+		if prefs.WebRTC.Policy != "disable_non_proxied_udp" || prefs.WebRTC.MultipleRoutes == nil || *prefs.WebRTC.MultipleRoutes ||
+			prefs.WebRTC.NonProxiedUDP == nil || *prefs.WebRTC.NonProxiedUDP {
+			t.Errorf("%s: webrtc prefs = %s", dir, data)
+		}
+		if dir == existing && (!strings.Contains(string(data), `"name":"acct"`) || !strings.Contains(string(data), "13385920394810294810")) {
+			t.Errorf("existing settings lost: %s", data)
 		}
 	}
 }

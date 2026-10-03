@@ -256,12 +256,3 @@ func resolveConflictingFlags(flags []string) []string {
 
 	return result
 }
-
-// GetWebRTCFlags 配置了代理时禁止 WebRTC 绕过代理直连 UDP，避免泄露真实 IP；
-// 这是浏览器原生策略，页面看到的仍是原生 RTCPeerConnection
-func GetWebRTCFlags(proxyConfigured bool) []string {
-	if !proxyConfigured {
-		return nil
-	}
-	return []string{"--force-webrtc-ip-handling-policy=disable_non_proxied_udp"}
-}

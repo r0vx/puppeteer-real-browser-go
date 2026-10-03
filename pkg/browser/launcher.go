@@ -1,11 +1,16 @@
 package browser
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -60,6 +65,14 @@ func (cl *ChromeLauncher) Launch(ctx context.Context, opts *ConnectOptions) (*Ch
 	tempDir := ""
 	if isTemp {
 		tempDir = userDataDir
+	}
+	if opts.Proxy != nil {
+		if err := setWebRTCPolicy(userDataDir); err != nil {
+			if tempDir != "" {
+				os.RemoveAll(tempDir)
+			}
+			return nil, err
+		}
 	}
 
 	// Build Chrome flags
@@ -144,7 +157,6 @@ func (cl *ChromeLauncher) buildChromeFlags(opts *ConnectOptions, port int, userD
 		if opts.Proxy != nil {
 			proxyFlags := config.GetProxyFlags(opts.Proxy.Host, opts.Proxy.Port)
 			flags = append(flags, proxyFlags...)
-			flags = append(flags, config.GetWebRTCFlags(true)...)
 		}
 
 		// Add extension flags if configured
@@ -233,7 +245,6 @@ func (cl *ChromeLauncher) buildChromeFlags(opts *ConnectOptions, port int, userD
 		if opts.Proxy != nil {
 			proxyFlags := config.GetProxyFlags(opts.Proxy.Host, opts.Proxy.Port)
 			flags = append(flags, proxyFlags...)
-			flags = append(flags, config.GetWebRTCFlags(true)...)
 		}
 
 		// Add cache flags if enabled
@@ -410,4 +421,42 @@ func isLinux() bool {
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+// setWebRTCPolicy 配置了代理时写进 profile 的 WebRTC 设置：禁止绕过代理直连 UDP，否则 STUN 会暴露真实公网 IP。
+// 与 Chrome 设置里的 webrtc.ip_handling_policy 是同一项；--force-webrtc-ip-handling-policy 启动参数在 Chrome 154 上不生效。
+// 已有的 Preferences（持久化 profile）只改 webrtc 段，其余设置原样保留
+func setWebRTCPolicy(userDataDir string) error {
+	path := filepath.Join(userDataDir, "Default", "Preferences")
+	prefs := map[string]any{}
+	data, err := os.ReadFile(path)
+	switch {
+	case err == nil:
+		dec := json.NewDecoder(bytes.NewReader(data))
+		dec.UseNumber() // Preferences 里有超出 float64 精度的整数
+		if err := dec.Decode(&prefs); err != nil {
+			return fmt.Errorf("parse %s: %w", path, err)
+		}
+	case !errors.Is(err, fs.ErrNotExist):
+		return fmt.Errorf("read %s: %w", path, err)
+	}
+	webrtc, _ := prefs["webrtc"].(map[string]any)
+	if webrtc == nil {
+		webrtc = map[string]any{}
+	}
+	webrtc["ip_handling_policy"] = "disable_non_proxied_udp"
+	webrtc["multiple_routes_enabled"] = false
+	webrtc["nonproxied_udp_enabled"] = false
+	prefs["webrtc"] = webrtc
+	out, err := json.Marshal(prefs)
+	if err != nil {
+		return fmt.Errorf("encode %s: %w", path, err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("create %s: %w", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, out, 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	return nil
 }
