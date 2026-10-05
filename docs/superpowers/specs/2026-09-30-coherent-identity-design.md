@@ -49,7 +49,7 @@
 |---|---|---|
 | UA 系统段 | `Windows NT 10.0; Win64; x64` | `Macintosh; Intel Mac OS X 10_15_7`（Chrome 冻结值） |
 | `navigator.platform` | `Win32` | `MacIntel` |
-| client hints `platform` / `platformVersion` | `Windows` / `10.0.0`（Win10）或 `15.0.0`、`19.0.0`（Win11） | `macOS` / `13.x`–`15.x` |
+| client hints `platform` / `platformVersion` | `Windows` / `10.0.0`（Win10）。2026-10-05 决定：只报 Win10，因为生产字体取自 Windows 10，报 Win11（`15.0.0`、`19.0.0`）会与按字体推断出的系统版本矛盾；有正版 Win11 字体后再按账号分开 | `macOS` / `13.x`–`15.x` |
 | `architecture` / `bitness` | `x86` / `64` | Apple 芯片 `arm`、Intel `x86` / `64` |
 | WebGL 显卡池 | Intel / NVIDIA / AMD 的 D3D11 ANGLE 串及对应参数 | Apple M 系列 Metal 串（arm）或 Intel/AMD（x86） |
 | DPR / 屏幕池 | 1、1.25、1.5；常见 Windows 分辨率 | 2；MacBook / iMac 常见分辨率 |

@@ -124,9 +124,11 @@ var macGPUs = []weighted[gpuProfile]{
 var linuxHostGPU = gpuProfile{Vendor: "Google Inc. (Intel)", Renderer: "ANGLE (Intel, Mesa Intel(R) UHD Graphics 620 (KBL GT2), OpenGL 4.6)"}
 
 var (
-	windowsCores            = []weighted[int]{{4, 25}, {6, 15}, {8, 30}, {12, 15}, {16, 12}, {20, 3}}
-	macCores                = []weighted[int]{{8, 60}, {10, 25}, {12, 15}}
-	windowsPlatformVersions = []weighted[string]{{"10.0.0", 40}, {"15.0.0", 30}, {"19.0.0", 30}} // Win10 / Win11 22H2–23H2 / Win11 24H2
+	windowsCores = []weighted[int]{{4, 25}, {6, 15}, {8, 30}, {12, 15}, {16, 12}, {20, 3}}
+	macCores     = []weighted[int]{{8, 60}, {10, 25}, {12, 15}}
+	// 只报 Win10：生产镜像的字体取自 Windows 10，网站能按字体推断系统版本（Win11 才有 Segoe Fluent Icons），
+	// 报 Win11 会与字体矛盾。有了正版 Win11 字体后，再按账号分开字体集合，恢复 15.0.0（22H2–23H2）/ 19.0.0（24H2）
+	windowsPlatformVersions = []weighted[string]{{"10.0.0", 1}}
 	macPlatformVersions     = []weighted[string]{{"14.7.6", 30}, {"15.5.0", 35}, {"15.6.1", 35}}
 )
 

@@ -2,6 +2,7 @@ package browser
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -125,6 +126,25 @@ func TestNormalizeLegacyFingerprint(t *testing.T) {
 				t.Error("second Normalize changed the config")
 			}
 		})
+	}
+}
+
+// TestWindowsIdentitiesAreWindows10 生产镜像的字体来自 Windows 10，网站能按字体推断系统版本（Win11 才有 Segoe Fluent Icons）：
+// Windows 账号一律报 Win10（client hints platformVersion 10.0.0），已存的 Win11 账号加载时改成 Win10，任务栏随之按 Win10 的 40 像素算
+func TestWindowsIdentitiesAreWindows10(t *testing.T) {
+	for _, pv := range []string{"15.0.0", "19.0.0"} {
+		c := legacyConfig("win11-"+pv, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+			"", "", "zh-CN", []string{"zh-CN", "zh"}, "Asia/Shanghai", 1920, 1080, 1, 8)
+		c.Browser.PlatformVersion = pv
+		c.Normalize()
+		if c.Browser.PlatformVersion != "10.0.0" || c.Screen.AvailHeight != 1040 {
+			t.Errorf("stored Win11 account (%s) -> platformVersion %q availHeight %d, want 10.0.0 / 1040", pv, c.Browser.PlatformVersion, c.Screen.AvailHeight)
+		}
+	}
+	for i := range 50 {
+		if pv := generateFingerprintFor(fmt.Sprintf("new-win-%d", i), OSWindows).Browser.PlatformVersion; pv != "10.0.0" {
+			t.Fatalf("new Windows account got platformVersion %q, want 10.0.0", pv)
+		}
 	}
 }
 
