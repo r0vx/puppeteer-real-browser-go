@@ -8,12 +8,15 @@
 ## 字体
 网站会做字体探测：用一串候选字体测量文字宽度，判断哪些字体存在。2026-10-03 在模拟生产的容器里实测，不做处理时只能检测到 Liberation 字体：一看就是 Linux，没有任何 Windows 字体，而且**中文全部显示成方块**。生产镜像必须处理：
 
-1. **安装 Windows 字体**（自备合法授权文件，放在 `fonts/windows/`）：微软雅黑（msyh）、宋体（simsun）、黑体（simhei）、Arial、Times New Roman、Segoe UI、Calibri、Consolas、Tahoma、Verdana。**至少要有微软雅黑或宋体**，否则中文显示成方块（`production.Dockerfile` 构建时会检查，没有就报错）。
-2. **屏蔽 Linux 自带的西文字体**：把 `fontconfig/99-windows-fonts-only.conf` 放进 `/etc/fonts/conf.d/`。它会隐藏 Liberation、DejaVu，并让 sans-serif / serif / monospace 优先用 Windows 字体。中文字体不屏蔽：实在拿不到微软雅黑时，可以装 `fonts-noto-cjk` 兜底，中文能正常显示，但字体探测能看出这是 Linux。
+1. **安装 Windows 字体**（自备合法授权文件，放在 `fonts/windows/`，**不要提交进 git**，本仓库已忽略 `/fonts/`）：最真实的做法是把一台 Windows 的 `C:\Windows\Fonts` 里全部 `.ttf` / `.ttc` 拷过来（Windows 10 约 150 个文件、420MB），网站枚举字体时看到的就是真 Windows 的默认组合。**至少要有微软雅黑或宋体**，否则中文显示成方块（`production.Dockerfile` 构建时会检查，没有就报错）。
+   - 只拷系统自带字体，别带用户自己装的字体，否则指纹会变得独特。例外是 Noto Sans SC：Windows 版 Chrome 显示简体中文时会优先用它（没有才用微软雅黑），装了也不突兀。
+   - **系统版本要和字体一致**：网站可以按字体推断 Windows 版本（例如 Segoe Fluent Icons 只有 Windows 11 才有，CreepJS 就这么判断）。字体来自 Windows 10 时，报 Windows 11 的账号（client hints 的 platformVersion 为 15.0.0 / 19.0.0）会出现"系统版本与字体不符"。
+2. **屏蔽 Linux 自带的西文字体**：把 `fontconfig/55-windows-fonts-only.conf` 放进 `/etc/fonts/conf.d/`。它会隐藏 Liberation、DejaVu，并让 sans-serif / serif / monospace 优先用 Windows 字体。中文字体不屏蔽：实在拿不到微软雅黑时，可以装 `fonts-noto-cjk` 兜底，中文能正常显示，但字体探测能看出这是 Linux。
+   - 已知残余：Chrome 在 Linux 上把 Arial / Times New Roman / Courier New 当作 Liberation Sans / Serif / Mono 的等价字体，所以探测"Liberation Sans 是否存在"仍会得到"存在"（真 Windows 上不存在）。CreepJS 等常见检测不查这一项。
 3. **检查**：
    ```bash
    docker run --rm <镜像> fc-list : family | sort -u   # 只应出现 Windows 字体，不能有 Liberation / DejaVu
-   docker run --rm <镜像> fc-match sans-serif          # 应为 Arial
+   docker run --rm <镜像> fc-match sans-serif          # 应为 Arial（serif → Times New Roman，monospace → Courier New，与 Windows 版 Chrome 默认一致）
    docker run --rm <镜像> fc-list :lang=zh family      # 不能为空
    ```
 

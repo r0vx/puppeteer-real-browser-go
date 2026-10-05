@@ -14,7 +14,7 @@ RUN apt-get update \
 # Windows 账号需要的字体：自备合法授权的字体文件，放在构建上下文的 fonts/windows/ 下（必须含微软雅黑或宋体，否则中文显示成方块）
 COPY fonts/windows/ /usr/share/fonts/windows/
 # 只让 Chrome 看到 Windows 字体：把 docs/deploy/fontconfig/ 复制到构建上下文
-COPY fontconfig/99-windows-fonts-only.conf /etc/fonts/conf.d/99-windows-fonts-only.conf
+COPY fontconfig/55-windows-fonts-only.conf /etc/fonts/conf.d/55-windows-fonts-only.conf
 RUN fc-cache -f \
  && (fc-list :lang=zh family | grep -q . || (echo "缺少中文字体：fonts/windows/ 里至少要有微软雅黑（msyh）或宋体（simsun）" >&2; exit 1))
 COPY --from=build /out/app /usr/local/bin/app

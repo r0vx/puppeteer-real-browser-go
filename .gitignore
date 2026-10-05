@@ -132,3 +132,6 @@ tramp
 
 # Built Visual Studio Code Extensions
 *.vsix
+
+# Windows 字体文件：有授权限制，只在本地用于构建镜像和测试，绝不提交
+/fonts/
