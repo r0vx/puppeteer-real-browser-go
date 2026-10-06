@@ -126,6 +126,9 @@ type BrowserContext struct {
 	chrome      *ChromeProcess
 	opts        *ConnectOptions
 	custom      *CustomCDPPage // 实例是 CustomCDP 时的主页面（NewPage 经它开新标签页）
+
+	tabsMu sync.Mutex
+	tabs   []*CustomCDPPage // 本上下文开出的标签页，Close 时一并关闭
 }
 
 // ChromeProcess represents a Chrome process

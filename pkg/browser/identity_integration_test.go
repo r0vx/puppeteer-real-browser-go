@@ -489,3 +489,67 @@ func TestClosedTabsReleaseHandlers(t *testing.T) {
 		t.Errorf("after 5 closed tabs: %d handler keys / %d subscriptions, baseline %d / %d", k, s, k0, s0)
 	}
 }
+
+// TestBrowserContextCloseClosesTabs BrowserContext.Close 关闭它开出的全部标签页（注释承诺的行为），Pages 列出仍开着的标签页
+func TestBrowserContextCloseClosesTabs(t *testing.T) {
+	inst, err := Connect(t.Context(), &ConnectOptions{Headless: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer inst.Close()
+	conn := inst.Page().(*CustomCDPPage).client.conn
+	pageTargets := func() int {
+		raw, err := conn.call("", "Target.getTargets", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var res struct {
+			TargetInfos []struct{ Type string } `json:"targetInfos"`
+		}
+		json.Unmarshal(raw, &res)
+		n := 0
+		for _, ti := range res.TargetInfos {
+			if ti.Type == "page" {
+				n++
+			}
+		}
+		return n
+	}
+	before := pageTargets()
+	bc, err := inst.CreateBrowserContext(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tabs []Page
+	for range 3 {
+		p, err := bc.NewPage()
+		if err != nil {
+			t.Fatal(err)
+		}
+		tabs = append(tabs, p)
+	}
+	// 手动关掉一个：Pages 不再列出它；重复关闭不报错
+	if err := tabs[0].Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := tabs[0].Close(); err != nil {
+		t.Errorf("second Close of a tab: %v", err)
+	}
+	if pages, _ := bc.Pages(); len(pages) != 2 {
+		t.Errorf("Pages() = %d, want 2", len(pages))
+	}
+	if err := bc.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for deadline := time.Now().Add(3 * time.Second); time.Now().Before(deadline) && pageTargets() > before; time.Sleep(100 * time.Millisecond) {
+	}
+	if n := pageTargets(); n != before {
+		t.Errorf("after BrowserContext.Close: %d page targets, want %d", n, before)
+	}
+	if pages, _ := bc.Pages(); len(pages) != 0 {
+		t.Errorf("Pages() after Close = %d, want 0", len(pages))
+	}
+	if err := inst.Page().Navigate("data:text/html,<title>still</title>"); err != nil {
+		t.Errorf("main page unusable after BrowserContext.Close: %v", err)
+	}
+}

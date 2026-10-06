@@ -2,6 +2,7 @@ package browser
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/chromedp/chromedp"
@@ -11,7 +12,14 @@ import (
 // This creates a new tab/context within the browser context
 func (bc *BrowserContext) NewPage() (Page, error) {
 	if bc.custom != nil {
-		return bc.custom.openTab()
+		tab, err := bc.custom.openTab()
+		if err != nil {
+			return nil, err
+		}
+		bc.tabsMu.Lock()
+		bc.tabs = append(bc.tabs, tab)
+		bc.tabsMu.Unlock()
+		return tab, nil
 	}
 	// Create a new chromedp context within this browser context
 	// This is equivalent to creating a new tab in the same browser context
@@ -47,17 +55,35 @@ func (bc *BrowserContext) NewPage() (Page, error) {
 
 // Close closes the browser context and all its pages
 func (bc *BrowserContext) Close() error {
+	// 关闭本上下文开出的 CustomCDP 标签页（已被单独关闭的跳过）
+	bc.tabsMu.Lock()
+	tabs := bc.tabs
+	bc.tabs = nil
+	bc.tabsMu.Unlock()
+	var errs []error
+	for _, tab := range tabs {
+		if err := tab.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
 	if bc.allocCancel != nil {
 		bc.allocCancel()
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 // Pages returns all pages in this context (simplified implementation)
 func (bc *BrowserContext) Pages() ([]Page, error) {
-	// This is a simplified implementation
-	// In a full implementation, we would track all pages created in this context
-	return []Page{}, nil
+	// CustomCDP 实例：本上下文开出、还没关闭的标签页；chromedp 实例不跟踪（与原先一致，返回空）
+	bc.tabsMu.Lock()
+	defer bc.tabsMu.Unlock()
+	pages := []Page{}
+	for _, tab := range bc.tabs {
+		if !tab.closed.Load() {
+			pages = append(pages, tab)
+		}
+	}
+	return pages, nil
 }
 
 // CreateBrowserInstance creates a BrowserInstance from this context with a new page

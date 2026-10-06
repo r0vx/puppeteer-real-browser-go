@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/chromedp/cdproto/fetch"
@@ -473,6 +474,7 @@ type CustomCDPPage struct {
 	targetID     string         // 本页的 targetId（调整窗口、关闭标签页用）
 	targets      *targetManager // 本浏览器的目标管理器（openTab 用）
 	closeTabOnly bool           // openTab 开出的页面：Close 只关自己的标签页，不断开浏览器连接
+	closed       atomic.Bool    // openTab 开出的页面已关闭（Close 幂等、BrowserContext.Pages 排除它）
 
 	// 请求拦截状态
 	fetchMu         sync.Mutex
@@ -884,6 +886,9 @@ func (p *CustomCDPPage) GetURL() (string, error) {
 // Close 关闭页面：openTab 开出的页面只关自己的标签页；主页面断开浏览器连接（随后由实例关闭 Chrome）
 func (p *CustomCDPPage) Close() error {
 	if p.closeTabOnly {
+		if p.closed.Swap(true) {
+			return nil // 已关闭：重复调用不报错
+		}
 		if _, err := p.client.conn.call("", "Target.closeTarget", map[string]any{"targetId": p.targetID}); err != nil {
 			return fmt.Errorf("close tab: %w", err)
 		}
