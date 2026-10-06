@@ -112,35 +112,41 @@ func TestConnectFailsFastWhenChromeExits(t *testing.T) {
 // TestCloseShutsDownGracefully Close 应让 Chrome 走正常退出流程：profile 落盘且未标记为崩溃。
 // SIGTERM 退出记为 "SessionEnded"，CDP Browser.close 记为 "Normal"；
 // 被 SIGKILL 时 Preferences 来不及写，或停留在启动时写入的 "Crashed"。
+// 两条通道各连续跑几次：先断开 CDP 连接再发 SIGTERM 时，Chrome 常常来不及落盘（偶发，所以要多跑）
 func TestCloseShutsDownGracefully(t *testing.T) {
-	dir, err := os.MkdirTemp("", "prbg-graceful-*")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(dir)
+	for _, chromedpPath := range []bool{false, true} {
+		for i := range 5 {
+			dir, err := os.MkdirTemp("", "prbg-graceful-*")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer os.RemoveAll(dir)
 
-	inst, err := Connect(t.Context(), &ConnectOptions{Headless: true, CustomConfig: map[string]any{"userDataDir": dir}})
-	if err != nil {
-		t.Fatalf("Connect: %v", err)
-	}
-	if err := inst.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
+			inst, err := Connect(t.Context(), &ConnectOptions{Headless: true, UseChromedp: chromedpPath, CustomConfig: map[string]any{"userDataDir": dir}})
+			if err != nil {
+				t.Fatalf("Connect: %v", err)
+			}
+			if err := inst.Close(); err != nil {
+				t.Fatalf("Close: %v", err)
+			}
 
-	data, err := os.ReadFile(filepath.Join(dir, "Default", "Preferences"))
-	if err != nil {
-		t.Fatalf("read Preferences: %v", err)
-	}
-	var prefs struct {
-		Profile struct {
-			ExitType string `json:"exit_type"`
-		} `json:"profile"`
-	}
-	if err := json.Unmarshal(data, &prefs); err != nil {
-		t.Fatalf("parse Preferences: %v", err)
-	}
-	if got := prefs.Profile.ExitType; got != "SessionEnded" && got != "Normal" {
-		t.Errorf("profile.exit_type = %q, want SessionEnded or Normal", got)
+			data, err := os.ReadFile(filepath.Join(dir, "Default", "Preferences"))
+			if err != nil {
+				t.Errorf("UseChromedp=%v run %d: read Preferences: %v", chromedpPath, i, err)
+				continue
+			}
+			var prefs struct {
+				Profile struct {
+					ExitType string `json:"exit_type"`
+				} `json:"profile"`
+			}
+			if err := json.Unmarshal(data, &prefs); err != nil {
+				t.Fatalf("parse Preferences: %v", err)
+			}
+			if got := prefs.Profile.ExitType; got != "SessionEnded" && got != "Normal" {
+				t.Errorf("UseChromedp=%v run %d: profile.exit_type = %q, want SessionEnded or Normal", chromedpPath, i, got)
+			}
+		}
 	}
 }
 

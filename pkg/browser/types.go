@@ -136,6 +136,7 @@ type ChromeProcess struct {
 
 	tempUserDataDir string        // 本库创建的临时 profile，Kill 后删除；调用方指定或持久化的目录为空
 	exited          chan struct{} // 进程退出且已被 Wait 回收时关闭
+	sigterm         *sigtermOnce  // 正常退出请求只发一次（ctx 取消与 Kill 共用）
 
 	hostMu          sync.Mutex // 保护 host、managedIdentity
 	host            *hostInfo  // 真实浏览器信息缓存，见 browserHostInfo

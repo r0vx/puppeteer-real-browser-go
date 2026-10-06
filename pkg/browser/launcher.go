@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/r0vx/puppeteer-real-browser-go/internal/config"
@@ -89,6 +90,14 @@ func (cl *ChromeLauncher) Launch(ctx context.Context, opts *ConnectOptions) (*Ch
 	cmd := exec.CommandContext(ctx, chromePath, flags...)
 	// 进程组与 ctx 取消时的退出方式因平台而异，见 process_*.go
 	configureChromeCmd(cmd)
+	// ctx 取消和 Kill 共用同一次正常退出请求，见 sigtermOnce
+	term := &sigtermOnce{}
+	cmd.Cancel = func() error {
+		if term.terminate(cmd.Process) != nil {
+			return cmd.Process.Kill() // 平台不支持正常退出（Windows）：直接结束
+		}
+		return nil
+	}
 
 	// Start Chrome process
 	if err := cmd.Start(); err != nil {
@@ -105,6 +114,7 @@ func (cl *ChromeLauncher) Launch(ctx context.Context, opts *ConnectOptions) (*Ch
 		Flags:           flags,
 		tempUserDataDir: tempDir,
 		exited:          make(chan struct{}),
+		sigterm:         term,
 	}
 	// 后台 Wait 回收进程，exited 关闭即已退出；IsRunning/Kill 据此判断，
 	// 不能用 signal 0：未回收的僵尸进程同样收信号成功
@@ -326,7 +336,7 @@ func (cp *ChromeProcess) Kill() error {
 	}
 
 	// 先请求正常退出（让 profile 落盘）；平台不支持时直接强杀
-	if terminateProcess(cp.Cmd.Process) == nil {
+	if cp.sigterm.terminate(cp.Cmd.Process) == nil {
 		select {
 		case <-cp.exited:
 			return nil
@@ -459,4 +469,20 @@ func setWebRTCPolicy(userDataDir string) error {
 		return fmt.Errorf("write %s: %w", path, err)
 	}
 	return nil
+}
+
+// sigtermOnce 每个 Chrome 进程只请求一次正常退出。ctx 取消（exec 的 Cancel）和 Kill 都会请求，
+// 而 Chrome 在退出过程中再收到 SIGTERM 会立即结束，profile 来不及落盘（Preferences 缺失）
+type sigtermOnce struct {
+	once sync.Once
+	err  error
+}
+
+// terminate 请求正常退出，只真正发送一次；平台不支持时返回错误。nil 接收者直接发送（无去重）
+func (s *sigtermOnce) terminate(p *os.Process) error {
+	if s == nil {
+		return terminateProcess(p)
+	}
+	s.once.Do(func() { s.err = terminateProcess(p) })
+	return s.err
 }

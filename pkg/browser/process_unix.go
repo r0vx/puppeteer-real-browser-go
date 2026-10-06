@@ -12,11 +12,10 @@ import (
 )
 
 // configureChromeCmd 把 Chrome 放进独立进程组以便整组清理。
-// ctx 取消（含 BrowserInstance.Close）时 exec 默认 SIGKILL，profile 来不及落盘；
-// 改为先 SIGTERM 让 Chrome 正常退出，5s 内未退出再由 exec 强杀
+// ctx 取消（含 BrowserInstance.Close）时由 Launch 设置的 cmd.Cancel 先 SIGTERM 让 Chrome 正常退出
+// （经 sigtermOnce 与 Kill 共用，只发一次），5s 内未退出再由 exec 强杀
 func configureChromeCmd(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
 	cmd.WaitDelay = 5 * time.Second
 }
 
