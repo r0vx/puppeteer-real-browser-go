@@ -24,7 +24,7 @@ const (
 )
 
 func main() {
-	fmt.Println("🎯 UseCustomCDP: true 功能测试")
+	fmt.Println("🎯 CustomCDP（默认通道）功能测试")
 	fmt.Println("================================")
 	fmt.Println("测试页面: https://pay.ssl.kuaishou.com/pay")
 	fmt.Println()
@@ -32,15 +32,14 @@ func main() {
 	ctx := context.Background()
 
 	opts := &browser.ConnectOptions{
-		Headless:     false,
-		UseCustomCDP: true, // 测试自定义 CDP 模式
-		Turnstile:    false,
+		Headless:  false,
+		Turnstile: false,
 		Args: []string{
 			"--window-size=1280,900",
 		},
 	}
 
-	fmt.Println("🚀 启动浏览器 (UseCustomCDP: true)...")
+	fmt.Println("🚀 启动浏览器（默认 CustomCDP 通道）...")
 	instance, err := browser.Connect(ctx, opts)
 	if err != nil {
 		log.Fatalf("❌ 连接失败: %v", err)

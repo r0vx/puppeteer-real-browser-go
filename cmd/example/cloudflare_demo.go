@@ -17,9 +17,8 @@ func main() {
 
 	// Use our fixed implementation with Runtime.Enable bypass
 	opts := &browser.ConnectOptions{
-		Headless:     false, // Keep visible to see Cloudflare page
-		UseCustomCDP: false, // Use standard chromedp with Runtime bypass
-		Turnstile:    true,  // Enable Turnstile solving
+		Headless:  false, // Keep visible to see Cloudflare page
+		Turnstile: true,  // Enable Turnstile solving
 		Args: []string{
 			"--start-maximized",
 		},

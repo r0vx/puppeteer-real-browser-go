@@ -37,7 +37,7 @@ func testWithoutStealth(ctx context.Context) {
 
 	opts := &browser.ConnectOptions{
 		Headless:     false, // 可视化观察
-		UseCustomCDP: false, // 不使用反检测
+		UseChromedp:  true,  // 对照组：旧 chromedp 通道（只给主页面下发身份）
 	}
 
 	instance, err := browser.Connect(ctx, opts)
@@ -103,7 +103,6 @@ func testWithStealth(ctx context.Context) {
 
 	opts := &browser.ConnectOptions{
 		Headless:     false, // 可视化观察
-		UseCustomCDP: true,  // 启用反检测
 		Turnstile:    true,  // 启用验证码自动解决
 		Args: []string{
 			"--start-maximized",

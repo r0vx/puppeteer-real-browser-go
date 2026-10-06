@@ -52,7 +52,6 @@ func main() {
 	// 配置选项 - 使用最简单的配置
 	options := &browser.ConnectOptions{
 		Headless:       false,
-		UseCustomCDP:   false,
 		Turnstile:      false,
 		Extensions:     extensionPaths,
 		PersistProfile: false,

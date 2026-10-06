@@ -23,7 +23,6 @@ func main() {
 
 	opts := &browser.ConnectOptions{
 		Headless:     false,
-		UseCustomCDP: true, // 使用自定义 CDP（带完整 stealth）
 		Args:         []string{"--window-size=1280,800"},
 	}
 

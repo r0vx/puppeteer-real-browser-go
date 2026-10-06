@@ -37,9 +37,8 @@ func main() {
 	ctx := context.Background()
 
 	opts := &browser.ConnectOptions{
-		Headless:     false,
-		UseCustomCDP: true,
-		Turnstile:    false,
+		Headless:  false,
+		Turnstile: false,
 		Args: []string{
 			"--window-size=1920,1080",
 		},

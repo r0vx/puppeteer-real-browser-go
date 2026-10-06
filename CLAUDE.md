@@ -31,9 +31,9 @@ A Go anti-detection headless-Chrome automation library (port of `puppeteer-real-
 Public entry point: `browser.Connect(ctx, opts *ConnectOptions) (*BrowserInstance, error)` (`pkg/browser/browser.go`). Flow:
 
 1. **Launch** (`launcher.go`) — finds Chrome, picks a free port, builds flags (`internal/config`, `internal/utils`), starts the process, sets up Xvfb on Linux.
-2. **Connect** — branches on `opts.UseCustomCDP`:
-   - **false** → `CDPConnector` (`connector.go`), page type `CDPPage`, built on `chromedp`.
-   - **true** → `CustomCDPConnector` (`cdp_custom.go`), page type `CustomCDPPage`, a **raw `gorilla/websocket` CDP client that never calls `Runtime.Enable`** — this is the core stealth advantage (avoids the Runtime.Enable detection leak). This is the recommended/max-stealth path.
+2. **Connect** — branches on `opts.UseChromedp` (since 2026-10; `UseCustomCDP` is deprecated and ignored):
+   - **false (default)** → `CustomCDPConnector` (`cdp_custom.go`), page type `CustomCDPPage`: a browser-level CDP connection (`cdp_conn.go`) whose target manager applies the identity to every page / cross-site iframe / worker / popup before it runs; never calls `Runtime.enable`. `CreateBrowserContext().NewPage()` opens CustomCDP tabs on the same connection (`openTab`; such tabs close only themselves).
+   - **true** → legacy `CDPConnector` (`connector.go`), page type `CDPPage`, built on `chromedp`: identity on the main page only. Only for code that calls chromedp directly via `GetContext()`.
 3. Both page types implement the `Page` interface (`types.go`). Richer selector/cookie/storage methods live on the `PageWithSelector` interface — reach them via type assertion (`page.(*CDPPage)` / `*CustomCDPPage`).
 
 **Identity (anti-detection)** — design: `docs/superpowers/specs/2026-09-30-coherent-identity-design.md`, applied before any page script runs:

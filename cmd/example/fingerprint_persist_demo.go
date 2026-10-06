@@ -30,7 +30,6 @@ func main() {
 	ctx := context.Background()
 	opts := &browser.ConnectOptions{
 		Headless:          false,
-		UseCustomCDP:      true,
 		FingerprintUserID: userID,         // 只需指定 UserID
 		FingerprintDir:    fingerprintDir, // 可选，默认 ./fingerprints
 		// 初始化参数 - 首次创建指纹时使用，后续加载不会覆盖

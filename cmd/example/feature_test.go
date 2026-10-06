@@ -19,8 +19,8 @@ func main() {
 	ctx := context.Background()
 
 	opts := &browser.ConnectOptions{
-		Headless:     false,
-		UseCustomCDP: false,
+		Headless:    false,
+		UseChromedp: true, // 测试 16 直接取 chromedp context，需要旧通道
 		Args: []string{
 			"--window-size=1280,800",
 		},

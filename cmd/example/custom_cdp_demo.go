@@ -13,15 +13,14 @@ func main() {
 	fmt.Println("🎯 Custom CDP 模式使用演示")
 	fmt.Println("=" + string(make([]byte, 60)))
 	fmt.Println()
-	fmt.Println("UseCustomCDP: true - 完全避免 Runtime.Enable")
+	fmt.Println("默认 CustomCDP 通道 - 完全避免 Runtime.Enable")
 	fmt.Println()
 
 	ctx := context.Background()
 
 	// 使用 Custom CDP 模式（最强反检测）
 	opts := &browser.ConnectOptions{
-		Headless:     false,
-		UseCustomCDP: true, // ⭐ 启用自定义CDP客户端
+		Headless: false,
 		Args: []string{
 			"--disable-session-crashed-bubble",
 			"--disable-infobars",

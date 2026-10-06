@@ -41,9 +41,9 @@ func main() {
 	ctx := context.Background()
 
 	opts := &browser.ConnectOptions{
-		Headless:     false,
-		UseCustomCDP: false, // 网络监听需要标准 chromedp context
-		Turnstile:    false,
+		Headless:    false,
+		UseChromedp: true, // 本示例直接调用 chromedp（GetContext + chromedp.ListenTarget），需要旧通道
+		Turnstile:   false,
 		Args: []string{
 			"--window-size=1920,1080",
 		},

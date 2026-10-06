@@ -70,9 +70,8 @@ func main() {
     
     // Maximum stealth configuration
     opts := &browser.ConnectOptions{
-        Headless:     false,
-        UseCustomCDP: true,  // Maximum stealth mode
-        Turnstile:    true,  // Auto-solve captchas
+        Headless:  false,
+        Turnstile: true, // Auto-solve captchas（默认 CustomCDP 通道，无需额外选项）
         Args: []string{
             "--start-maximized",
             "--disable-blink-features=AutomationControlled",
@@ -165,7 +164,10 @@ type ConnectOptions struct {
     // Ignore default Chrome flags
     IgnoreAllFlags bool `json:"ignoreAllFlags"`
 
-    // Use custom CDP client (recommended for maximum stealth)
+    // 改走旧的 chromedp 通道（只给主页面下发身份）；默认 false = CustomCDP
+    UseChromedp bool `json:"useChromedp"`
+
+    // Deprecated: 不再影响通道选择，默认就是 CustomCDP
     UseCustomCDP bool `json:"useCustomCDP"`
 
     // Chrome extensions support
@@ -216,9 +218,8 @@ opts := &browser.ConnectOptions{
 
 ```go
 opts := &browser.ConnectOptions{
-    Headless:     false,             // Keep visible for debugging
-    UseCustomCDP: true,              // Avoids Runtime.Enable leaks
-    Turnstile:    true,              // Auto-solve captchas
+    Headless:  false, // Keep visible for debugging
+    Turnstile: true,  // Auto-solve captchas（默认 CustomCDP 通道）
     Args: []string{
         "--start-maximized",
         "--disable-blink-features=AutomationControlled",
@@ -278,14 +279,20 @@ defer solver.Stop()
 err := solver.WaitForSolution(30 * time.Second)
 ```
 
-### Custom CDP Client (Maximum Stealth)
+### 通道：默认 CustomCDP
+
+默认通道是自己实现的 CDP 客户端：浏览器级连接，主页面、跨站 iframe、专用 / 共享 Worker、弹窗都在运行前下发同一身份，不调用 `Runtime.enable`。`CreateBrowserContext().NewPage()` 新开的页面也走这条通道。
 
 ```go
 opts := &browser.ConnectOptions{
-    UseCustomCDP: true,  // Enables pure CDP client without Runtime.Enable
-    Turnstile:    true,
+    Turnstile: true, // 不写通道选项即为 CustomCDP
 }
 ```
+
+### 迁移：默认通道改为 CustomCDP（2026-10）
+- 不写通道选项时现在走 CustomCDP：主页面、跨站 iframe、Worker、弹窗都下发身份。`UseCustomCDP` 已废弃，可以删掉。
+- 需要旧的 chromedp 通道（例如 `GetContext()` 后直接调用 `chromedp.Run` / `chromedp.ListenTarget`）时，设 `UseChromedp: true`。chromedp 通道只给主页面下发身份，不防检测；CustomCDP 页面的 `GetContext()` 不是 chromedp 上下文。
+- 改用 CustomCDP 接口即可不再依赖 chromedp：`EnableNetwork`、`OnNetworkRequest`、`OnNetworkResponse`、`GetResponseBody`、`EnableFetch`、`OnRequestPaused`。
 
 ## 📝 Demo Files
 
@@ -406,7 +413,7 @@ make docker-run     # Run Docker container
 
 ### For Maximum Stealth
 1. **Always test without `--disable-web-security` first**
-2. **Use `UseCustomCDP: true` for production**
+2. **Use the default CustomCDP channel for production（不要设 `UseChromedp`）**
 3. **Keep `Headless: false` when debugging**
 4. **Enable `Turnstile: true` for automatic captcha solving**
 5. **Test on multiple websites to verify effectiveness**

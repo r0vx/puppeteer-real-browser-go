@@ -29,7 +29,6 @@ func main() {
 	// 配置选项
 	options := &browser.ConnectOptions{
 		Headless:       false,
-		UseCustomCDP:   false,
 		Turnstile:      false,
 		Extensions:     extensionPaths,
 		PersistProfile: false,

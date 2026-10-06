@@ -17,9 +17,8 @@ func main() {
 
 	// Test with our fixed implementation
 	opts := &browser.ConnectOptions{
-		Headless:     false,
-		UseCustomCDP: false, // Use standard chromedp with our fixes
-		Turnstile:    false,
+		Headless:  false,
+		Turnstile: false,
 		Args: []string{
 			"--start-maximized",
 		},

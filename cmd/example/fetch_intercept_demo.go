@@ -24,7 +24,6 @@ func main() {
 
 	opts := &browser.ConnectOptions{
 		Headless:     false,
-		UseCustomCDP: true,
 		Args: []string{
 			"--window-size=1280,800",
 		},
@@ -42,7 +41,7 @@ func main() {
 	// 类型断言获取 CustomCDPPage
 	customPage, ok := page.(*browser.CustomCDPPage)
 	if !ok {
-		log.Fatal("❌ 需要 UseCustomCDP: true")
+		log.Fatal("❌ 需要 CustomCDP 通道（不要设 UseChromedp）")
 	}
 
 	// 1. 启用网络监听（用于对比）

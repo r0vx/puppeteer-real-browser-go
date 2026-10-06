@@ -18,14 +18,13 @@ func main() {
 	fmt.Println("🎯 抖音二维码 API 监听 (CustomCDP)")
 	fmt.Println("=====================================")
 	fmt.Println("监听: get_qrcode, check_qrconnect")
-	fmt.Println("⚡ 使用 UseCustomCDP: true")
+	fmt.Println("⚡ 使用默认的 CustomCDP 通道")
 	fmt.Println()
 
 	ctx := context.Background()
 
 	opts := &browser.ConnectOptions{
 		Headless:          false,
-		UseCustomCDP:      true,
 		FingerprintUserID: "douyin_qrcode_test",
 		FingerprintDir:    "./fingerprints",
 		Language:          "zh-CN",
@@ -52,7 +51,7 @@ func main() {
 	// 类型断言获取 CustomCDPPage
 	customPage, ok := page.(*browser.CustomCDPPage)
 	if !ok {
-		log.Fatal("❌ 需要 UseCustomCDP: true 才能使用此功能")
+		log.Fatal("❌ 需要 CustomCDP 通道（不要设 UseChromedp）才能使用此功能")
 	}
 
 	// 存储请求信息

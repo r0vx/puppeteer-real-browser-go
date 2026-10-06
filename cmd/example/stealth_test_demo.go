@@ -257,9 +257,8 @@ func main() {
 	ctx := context.Background()
 
 	opts := &browser.ConnectOptions{
-		Headless:     false,
-		UseCustomCDP: true,
-		Args:         []string{"--window-size=1280,720"},
+		Headless: false,
+		Args:     []string{"--window-size=1280,720"},
 	}
 
 	fmt.Println("🚀 启动浏览器...")
