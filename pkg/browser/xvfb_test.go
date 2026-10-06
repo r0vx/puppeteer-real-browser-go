@@ -123,7 +123,7 @@ func TestConnectHeadfulStartsXvfb(t *testing.T) {
 	}
 	t.Setenv("DISPLAY", "")
 
-	inst, err := Connect(t.Context(), &ConnectOptions{Headless: false, UseCustomCDP: true})
+	inst, err := Connect(t.Context(), &ConnectOptions{Headless: false})
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}

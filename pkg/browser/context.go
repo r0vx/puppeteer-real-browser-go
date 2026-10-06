@@ -19,9 +19,8 @@ func (bc *BrowserContext) NewPage() (Page, error) {
 	if opts == nil {
 		// Create default options if not available
 		opts = &ConnectOptions{
-			Headless:     false,
-			Turnstile:    true,
-			UseCustomCDP: false,
+			Headless:  false,
+			Turnstile: true,
 		}
 	}
 

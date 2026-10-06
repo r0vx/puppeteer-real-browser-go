@@ -164,7 +164,7 @@ setTimeout(() => window.__done = true, 5000);
 	_, proxyPort, _ := net.SplitHostPort(strings.TrimPrefix(proxy.URL, "http://"))
 
 	for _, withProxy := range []bool{false, true} {
-		opts := &ConnectOptions{Headless: true, UseCustomCDP: true}
+		opts := &ConnectOptions{Headless: true}
 		if withProxy {
 			opts.Proxy = &ProxyConfig{Host: "127.0.0.1", Port: proxyPort}
 		}

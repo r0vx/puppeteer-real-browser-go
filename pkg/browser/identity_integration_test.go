@@ -124,7 +124,7 @@ func TestIdentityAcrossSurfaces(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			ss := newSurfaceServers(t)
-			opts := &ConnectOptions{Headless: true, UseCustomCDP: true, FingerprintDir: t.TempDir()}
+			opts := &ConnectOptions{Headless: true, FingerprintDir: t.TempDir()} // 不写通道选项：测默认通道
 			if tc.fpUser != "" {
 				opts.FingerprintUserID, opts.UserAgent, opts.Language, opts.Timezone = tc.fpUser, tc.ua, "ja-JP", "Asia/Tokyo"
 			}
@@ -236,7 +236,7 @@ func TestIdentityAcrossSurfaces(t *testing.T) {
 // TestIdentityTargetsThatVanish 跨站 iframe 刚插入就移除、弹窗刚打开就关闭时，页面不会卡住（Review Focus 2）
 func TestIdentityTargetsThatVanish(t *testing.T) {
 	ss := newSurfaceServers(t)
-	inst, err := Connect(t.Context(), &ConnectOptions{Headless: true, UseCustomCDP: true, FingerprintUserID: "vanish", FingerprintDir: t.TempDir()})
+	inst, err := Connect(t.Context(), &ConnectOptions{Headless: true, FingerprintUserID: "vanish", FingerprintDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -264,7 +264,7 @@ func TestConnectRejectsCorruptFingerprint(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "corrupt.json"), []byte("{"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	inst, err := Connect(t.Context(), &ConnectOptions{Headless: true, UseCustomCDP: true, FingerprintUserID: "corrupt", FingerprintDir: dir})
+	inst, err := Connect(t.Context(), &ConnectOptions{Headless: true, FingerprintUserID: "corrupt", FingerprintDir: dir})
 	if err == nil {
 		inst.Close()
 		t.Fatal("Connect succeeded with a corrupt fingerprint file")
@@ -275,7 +275,7 @@ func TestConnectRejectsCorruptFingerprint(t *testing.T) {
 func TestCDPPageIdentity(t *testing.T) {
 	ss := newSurfaceServers(t)
 	inst, err := Connect(t.Context(), &ConnectOptions{
-		Headless: true, FingerprintUserID: "cdppage-win", FingerprintDir: t.TempDir(), Language: "ja-JP",
+		Headless: true, UseChromedp: true, FingerprintUserID: "cdppage-win", FingerprintDir: t.TempDir(), Language: "ja-JP",
 		UserAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
 	})
 	if err != nil {
@@ -319,10 +319,10 @@ func TestCDPPageIdentity(t *testing.T) {
 func TestSetViewportKeepsIdentity(t *testing.T) {
 	ss := newSurfaceServers(t)
 	const macUA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-	for _, custom := range []bool{false, true} {
+	for _, chromedpPath := range []bool{true, false} {
 		for _, fp := range []string{"", "viewport-mac"} {
-			t.Run(fmt.Sprintf("UseCustomCDP=%v/fingerprint=%q", custom, fp), func(t *testing.T) {
-				opts := &ConnectOptions{Headless: true, UseCustomCDP: custom, FingerprintDir: t.TempDir()}
+			t.Run(fmt.Sprintf("UseChromedp=%v/fingerprint=%q", chromedpPath, fp), func(t *testing.T) {
+				opts := &ConnectOptions{Headless: true, UseChromedp: chromedpPath, FingerprintDir: t.TempDir()}
 				if fp != "" {
 					opts.FingerprintUserID, opts.UserAgent = fp, macUA
 				}
@@ -359,7 +359,7 @@ func TestSetViewportKeepsIdentity(t *testing.T) {
 func TestNewPageOnCustomCDPInstance(t *testing.T) {
 	ss := newSurfaceServers(t)
 	// 用 Windows 身份：与 macOS / Linux 宿主都不同，才能看出哪个值没被覆盖
-	inst, err := Connect(t.Context(), &ConnectOptions{Headless: true, UseCustomCDP: true, FingerprintUserID: "newpage-win", FingerprintDir: t.TempDir(),
+	inst, err := Connect(t.Context(), &ConnectOptions{Headless: true, FingerprintUserID: "newpage-win", FingerprintDir: t.TempDir(),
 		UserAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"})
 	if err != nil {
 		t.Fatal(err)

@@ -149,15 +149,11 @@ func (rb *RealBrowser) launchChrome(ctx context.Context, opts *ConnectOptions) (
 
 // connectToChrome establishes CDP connection to Chrome
 func (rb *RealBrowser) connectToChrome(ctx context.Context, chrome *ChromeProcess, opts *ConnectOptions) (Page, error) {
-	if opts.UseCustomCDP {
-		// Use custom CDP client to avoid Runtime.Enable leaks
-		connector := CreateCustomCDPConnector()
-		return connector.Connect(ctx, chrome, opts)
-	} else {
-		// Use standard chromedp
-		connector := NewCDPConnector()
-		return connector.Connect(ctx, chrome, opts)
+	// 默认 CustomCDP：所有目标在运行前下发身份；只有显式要求时才用旧的 chromedp 通道
+	if opts.UseChromedp {
+		return NewCDPConnector().Connect(ctx, chrome, opts)
 	}
+	return CreateCustomCDPConnector().Connect(ctx, chrome, opts)
 }
 
 // Connect is a convenience function to create and connect a browser

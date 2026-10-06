@@ -114,12 +114,12 @@ func TestURLPatternRegexp(t *testing.T) {
 // TestProxyAuth 带账号密码的代理：两种实现都应自动应答代理 407 并加载页面，
 // 且不能把代理凭据交给要求 HTTP 认证的目标站
 func TestProxyAuth(t *testing.T) {
-	for _, custom := range []bool{false, true} {
-		t.Run(fmt.Sprintf("UseCustomCDP=%v", custom), func(t *testing.T) {
+	for _, chromedpPath := range []bool{true, false} {
+		t.Run(fmt.Sprintf("UseChromedp=%v", chromedpPath), func(t *testing.T) {
 			proxy := newAuthProxy(t)
 			ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
 			defer cancel()
-			inst, err := Connect(ctx, &ConnectOptions{Headless: true, UseCustomCDP: custom, Proxy: proxy.config(t)})
+			inst, err := Connect(ctx, &ConnectOptions{Headless: true, UseChromedp: chromedpPath, Proxy: proxy.config(t)})
 			if err != nil {
 				t.Fatalf("Connect: %v", err)
 			}
@@ -159,9 +159,9 @@ func TestProxyAuth(t *testing.T) {
 // 配置了认证代理时（拦截与代理认证共用 Fetch）开关拦截不能破坏代理认证
 func TestRequestInterception(t *testing.T) {
 	for _, withProxy := range []bool{false, true} {
-		for _, custom := range []bool{false, true} {
-			t.Run(fmt.Sprintf("proxy=%v/UseCustomCDP=%v", withProxy, custom), func(t *testing.T) {
-				opts := &ConnectOptions{Headless: true, UseCustomCDP: custom}
+		for _, chromedpPath := range []bool{true, false} {
+			t.Run(fmt.Sprintf("proxy=%v/UseChromedp=%v", withProxy, chromedpPath), func(t *testing.T) {
+				opts := &ConnectOptions{Headless: true, UseChromedp: chromedpPath}
 				base := "http://prbg.test"
 				if withProxy {
 					opts.Proxy = newAuthProxy(t).config(t)

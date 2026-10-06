@@ -272,3 +272,30 @@ func TestConnectOptions(t *testing.T) {
 		})
 	}
 }
+
+// TestChannelSelection 默认走 CustomCDP；UseCustomCDP 已废弃不再影响通道；只有 UseChromedp 才走 chromedp
+func TestChannelSelection(t *testing.T) {
+	cases := []struct {
+		name       string
+		opts       *ConnectOptions
+		wantCustom bool
+	}{
+		{"default", &ConnectOptions{Headless: true}, true},
+		{"UseCustomCDP true (existing callers)", &ConnectOptions{Headless: true, UseCustomCDP: true}, true},
+		{"UseCustomCDP false no longer selects chromedp", &ConnectOptions{Headless: true, UseCustomCDP: false}, true},
+		{"UseChromedp", &ConnectOptions{Headless: true, UseChromedp: true}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			inst, err := Connect(t.Context(), tc.opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer inst.Close()
+			_, isCustom := inst.Page().(*CustomCDPPage)
+			if isCustom != tc.wantCustom {
+				t.Errorf("page type %T, want CustomCDP=%v", inst.Page(), tc.wantCustom)
+			}
+		})
+	}
+}

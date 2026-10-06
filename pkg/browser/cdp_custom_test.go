@@ -5,10 +5,10 @@ import (
 	"testing"
 )
 
-// TestCustomCDPPage 用真实 headless Chrome 覆盖 UseCustomCDP 主链路：
+// TestCustomCDPPage 用真实 headless Chrome 覆盖 CustomCDP（默认通道）主链路：
 // 挂载到真实 page 目标、stealth 脚本在新文档生效且不破坏页面 API、截图返回 PNG 原始字节。
 func TestCustomCDPPage(t *testing.T) {
-	inst, err := Connect(t.Context(), &ConnectOptions{Headless: true, UseCustomCDP: true})
+	inst, err := Connect(t.Context(), &ConnectOptions{Headless: true})
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}

@@ -44,8 +44,14 @@ type ConnectOptions struct {
 	// Plugin configurations (for future extensibility)
 	Plugins []interface{} `json:"plugins"`
 
-	// Use custom CDP client to avoid Runtime.Enable leaks (experimental)
+	// UseCustomCDP 不再影响通道选择：默认就走 CustomCDP（浏览器级连接，页面 / iframe / Worker / 弹窗都下发身份）。
+	//
+	// Deprecated: 无需再设置；要用旧的 chromedp 通道请设 UseChromedp。
 	UseCustomCDP bool `json:"useCustomCDP"`
+
+	// UseChromedp 改走旧的 chromedp 通道：只给主页面下发身份，会调用 Runtime.enable。
+	// 只在需要 chromedp 专有用法（GetContext() 后直接调用 chromedp）时使用
+	UseChromedp bool `json:"useChromedp"`
 
 	// Chrome extensions support
 	Extensions []string `json:"extensions"` // Paths to extension directories

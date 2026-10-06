@@ -33,9 +33,9 @@ func clicks(t *testing.T, p Page) [][]any {
 // TestTurnstileOption ConnectOptions.Turnstile 开启时自动点击未通过的 Turnstile 复选框
 // （容器左侧 30px、垂直居中，与原版一致），通过后停止点击；关闭时不点击
 func TestTurnstileOption(t *testing.T) {
-	for _, custom := range []bool{false, true} {
-		t.Run(fmt.Sprintf("UseCustomCDP=%v", custom), func(t *testing.T) {
-			inst, err := Connect(t.Context(), &ConnectOptions{Headless: true, UseCustomCDP: custom, Turnstile: true})
+	for _, chromedpPath := range []bool{true, false} {
+		t.Run(fmt.Sprintf("UseChromedp=%v", chromedpPath), func(t *testing.T) {
+			inst, err := Connect(t.Context(), &ConnectOptions{Headless: true, UseChromedp: chromedpPath, Turnstile: true})
 			if err != nil {
 				t.Fatalf("Connect: %v", err)
 			}

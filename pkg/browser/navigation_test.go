@@ -68,12 +68,12 @@ func evalString(t *testing.T, p Page, js string) string {
 func TestNavigation(t *testing.T) {
 	const docState = `document.readyState + ' ' + location.pathname + location.search`
 
-	for _, custom := range []bool{false, true} {
-		t.Run(fmt.Sprintf("UseCustomCDP=%v", custom), func(t *testing.T) {
+	for _, chromedpPath := range []bool{true, false} {
+		t.Run(fmt.Sprintf("UseChromedp=%v", chromedpPath), func(t *testing.T) {
 			srv := newNavServer(t)
 			ctx, cancel := context.WithTimeout(t.Context(), 120*time.Second)
 			defer cancel()
-			inst, err := Connect(ctx, &ConnectOptions{Headless: true, UseCustomCDP: custom})
+			inst, err := Connect(ctx, &ConnectOptions{Headless: true, UseChromedp: chromedpPath})
 			if err != nil {
 				t.Fatalf("Connect: %v", err)
 			}

@@ -50,11 +50,11 @@ func TestFingerprintAudioKeepsWebAudioWorking(t *testing.T) {
 		})()`, true},
 	}
 
-	for _, custom := range []bool{false, true} {
-		t.Run(fmt.Sprintf("UseCustomCDP=%v", custom), func(t *testing.T) {
+	for _, chromedpPath := range []bool{true, false} {
+		t.Run(fmt.Sprintf("UseChromedp=%v", chromedpPath), func(t *testing.T) {
 			inst, err := Connect(t.Context(), &ConnectOptions{
 				Headless:          true,
-				UseCustomCDP:      custom,
+				UseChromedp:       chromedpPath,
 				FingerprintUserID: "audio-test-user",
 				FingerprintDir:    t.TempDir(),
 			})
