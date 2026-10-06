@@ -18,9 +18,10 @@ type targetManager struct {
 	mainTarget string // 主页面的 targetId（启动时已有的标签页）
 	mainPage   chan attachResult
 
-	mu      sync.Mutex
-	pages   map[string]pageSession        // 已下发身份的页面目标：targetId → 会话
-	waiters map[string][]chan pageSession // 等某个页面目标的调用方
+	mu       sync.Mutex
+	pages    map[string]pageSession        // 已下发身份的页面目标：targetId → 会话
+	sessions map[string]string             // 会话 → targetId（断开事件按会话清理）
+	waiters  map[string][]chan pageSession // 等某个页面目标的调用方
 }
 
 // pageSession 一个页面目标的会话与下发结果
@@ -38,7 +39,7 @@ type attachResult struct {
 // startTargetManager 在浏览器会话上开启自动附加，等主页面（mainTarget）下发完成后返回管理器与主页面会话 ID
 func startTargetManager(conn *cdpConn, id *Identity, mainTarget string) (*targetManager, string, error) {
 	tm := &targetManager{conn: conn, identity: id, mainTarget: mainTarget, mainPage: make(chan attachResult, 1),
-		pages: map[string]pageSession{}, waiters: map[string][]chan pageSession{}}
+		pages: map[string]pageSession{}, sessions: map[string]string{}, waiters: map[string][]chan pageSession{}}
 	stopAttach := conn.subscribe("*", "Target.attachedToTarget", tm.onAttached)
 	stopDetach := conn.subscribe("*", "Target.detachedFromTarget", tm.forgetTarget)
 	stop := func() { stopAttach(); stopDetach() }
@@ -117,23 +118,33 @@ func (tm *targetManager) recordPage(targetID string, p pageSession) {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 	tm.pages[targetID] = p
+	tm.sessions[p.sessionID] = targetID
 	for _, ch := range tm.waiters[targetID] {
 		ch <- p // 缓冲为 1，不会阻塞
 	}
 	delete(tm.waiters, targetID)
 }
 
-// forgetTarget 目标断开（标签页关闭等）时移除登记
+// forgetTarget 目标断开（标签页关闭、iframe 移除等）时移除登记，并清掉这个会话在连接上的全部事件订阅
 func (tm *targetManager) forgetTarget(_ string, params json.RawMessage) {
 	var ev struct {
-		TargetID string `json:"targetId"`
+		SessionID string `json:"sessionId"`
+		TargetID  string `json:"targetId"` // CDP 已标记废弃，会话查不到时才用
 	}
 	if json.Unmarshal(params, &ev) != nil {
 		return
 	}
 	tm.mu.Lock()
-	delete(tm.pages, ev.TargetID)
+	target, ok := tm.sessions[ev.SessionID]
+	if !ok {
+		target = ev.TargetID
+	}
+	delete(tm.sessions, ev.SessionID)
+	delete(tm.pages, target)
 	tm.mu.Unlock()
+	if ev.SessionID != "" {
+		tm.conn.dropSession(ev.SessionID)
+	}
 }
 
 // waitPage 等页面目标下发完身份，返回它的会话；超时报错

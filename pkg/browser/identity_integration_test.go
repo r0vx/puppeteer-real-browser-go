@@ -437,3 +437,55 @@ func TestNewPageOnChromedpInstance(t *testing.T) {
 		t.Errorf("NewPage on a chromedp instance returned %T, want *CDPPage", np)
 	}
 }
+
+// TestClosedTabsReleaseHandlers 关掉的新标签页不能在共享连接上留下事件处理器：
+// 长期运行的服务每个任务开一个标签页时，残留的处理器（及其引用的页面）会让内存一直涨
+func TestClosedTabsReleaseHandlers(t *testing.T) {
+	ss := newSurfaceServers(t)
+	inst, err := Connect(t.Context(), &ConnectOptions{Headless: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer inst.Close()
+	conn := inst.Page().(*CustomCDPPage).client.conn
+	count := func() (keys, subs int) {
+		conn.mu.Lock()
+		defer conn.mu.Unlock()
+		for _, s := range conn.handlers {
+			subs += len(s)
+		}
+		return len(conn.handlers), subs
+	}
+	bc, err := inst.CreateBrowserContext(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	openAndClose := func() {
+		p, err := bc.NewPage()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := p.Navigate(ss.main.URL + "/plain"); err != nil {
+			t.Fatal(err)
+		}
+		if err := p.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// 断开事件是异步到达的：等计数不再超过目标
+	settle := func(keys, subs int) (int, int) {
+		for deadline := time.Now().Add(3 * time.Second); time.Now().Before(deadline); time.Sleep(100 * time.Millisecond) {
+			if k, s := count(); k <= keys && s <= subs {
+				return k, s
+			}
+		}
+		return count()
+	}
+	k0, s0 := count()
+	for range 5 {
+		openAndClose()
+	}
+	if k, s := settle(k0, s0); k > k0 || s > s0 {
+		t.Errorf("after 5 closed tabs: %d handler keys / %d subscriptions, baseline %d / %d", k, s, k0, s0)
+	}
+}

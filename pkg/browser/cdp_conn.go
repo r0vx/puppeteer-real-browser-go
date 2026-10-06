@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -164,7 +165,23 @@ func (c *cdpConn) subscribe(session, method string, fn func(session string, para
 	return func() {
 		c.mu.Lock()
 		defer c.mu.Unlock()
-		c.handlers[key] = slices.DeleteFunc(c.handlers[key], func(s eventSub) bool { return s.id == id })
+		if subs := slices.DeleteFunc(c.handlers[key], func(s eventSub) bool { return s.id == id }); len(subs) > 0 {
+			c.handlers[key] = subs
+		} else {
+			delete(c.handlers, key) // 不留空键：每个会话都有自己的键，留着会随标签页数量增长
+		}
+	}
+}
+
+// dropSession 移除某个会话的全部事件订阅（会话断开后调用，避免处理器及其引用的页面一直留在连接上）
+func (c *cdpConn) dropSession(session string) {
+	prefix := session + "\x00"
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for key := range c.handlers {
+		if strings.HasPrefix(key, prefix) {
+			delete(c.handlers, key)
+		}
 	}
 }
 
