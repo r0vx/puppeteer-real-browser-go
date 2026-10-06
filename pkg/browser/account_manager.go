@@ -27,7 +27,6 @@ func NewAccountManager(baseOptions *ConnectOptions) *AccountManager {
 	if baseOptions == nil {
 		baseOptions = &ConnectOptions{
 			Headless:       false,
-			UseCustomCDP:   true,
 			PersistProfile: true,
 		}
 	}
@@ -162,7 +161,7 @@ func (am *AccountManager) mergeOptions(base *ConnectOptions, account *ConnectOpt
 		DisableXvfb:    base.DisableXvfb,
 		IgnoreAllFlags: base.IgnoreAllFlags,
 		Plugins:        base.Plugins,
-		UseCustomCDP:   base.UseCustomCDP,
+		UseChromedp:    base.UseChromedp,
 		Extensions:     make([]string, len(base.Extensions)),
 		PersistProfile: base.PersistProfile,
 	}
@@ -194,8 +193,8 @@ func (am *AccountManager) mergeOptions(base *ConnectOptions, account *ConnectOpt
 			}
 		}
 		// Override boolean fields if they're explicitly set
-		if account.UseCustomCDP {
-			merged.UseCustomCDP = account.UseCustomCDP
+		if account.UseChromedp {
+			merged.UseChromedp = true
 		}
 		if account.Turnstile {
 			merged.Turnstile = account.Turnstile

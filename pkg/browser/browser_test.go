@@ -299,3 +299,18 @@ func TestChannelSelection(t *testing.T) {
 		})
 	}
 }
+
+// TestAccountManagerMergesChannel 账号级 UseChromedp 覆盖基础配置；不设时沿用基础配置
+func TestAccountManagerMergesChannel(t *testing.T) {
+	am := NewAccountManager(&ConnectOptions{Headless: true})
+	if got := am.mergeOptions(am.baseOptions, &ConnectOptions{UseChromedp: true}); !got.UseChromedp {
+		t.Error("account UseChromedp did not override the base options")
+	}
+	base := &ConnectOptions{Headless: true, UseChromedp: true}
+	if got := am.mergeOptions(base, &ConnectOptions{}); !got.UseChromedp {
+		t.Error("base UseChromedp lost when the account does not set it")
+	}
+	if got := am.mergeOptions(am.baseOptions, nil); got.UseChromedp {
+		t.Error("default merge selected chromedp")
+	}
+}
