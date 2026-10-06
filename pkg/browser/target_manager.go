@@ -3,6 +3,8 @@ package browser
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
+	"sync"
 	"time"
 )
 
@@ -15,6 +17,16 @@ type targetManager struct {
 	identity   *Identity
 	mainTarget string // 主页面的 targetId（启动时已有的标签页）
 	mainPage   chan attachResult
+
+	mu      sync.Mutex
+	pages   map[string]pageSession        // 已下发身份的页面目标：targetId → 会话
+	waiters map[string][]chan pageSession // 等某个页面目标的调用方
+}
+
+// pageSession 一个页面目标的会话与下发结果
+type pageSession struct {
+	sessionID string
+	err       error
 }
 
 // attachResult 主页面的附加结果
@@ -23,24 +35,27 @@ type attachResult struct {
 	err       error
 }
 
-// startTargetManager 在浏览器会话上开启自动附加，等主页面（mainTarget）下发完成后返回它的会话 ID
-func startTargetManager(conn *cdpConn, id *Identity, mainTarget string) (string, error) {
-	tm := &targetManager{conn: conn, identity: id, mainTarget: mainTarget, mainPage: make(chan attachResult, 1)}
-	stop := conn.subscribe("*", "Target.attachedToTarget", tm.onAttached)
+// startTargetManager 在浏览器会话上开启自动附加，等主页面（mainTarget）下发完成后返回管理器与主页面会话 ID
+func startTargetManager(conn *cdpConn, id *Identity, mainTarget string) (*targetManager, string, error) {
+	tm := &targetManager{conn: conn, identity: id, mainTarget: mainTarget, mainPage: make(chan attachResult, 1),
+		pages: map[string]pageSession{}, waiters: map[string][]chan pageSession{}}
+	stopAttach := conn.subscribe("*", "Target.attachedToTarget", tm.onAttached)
+	stopDetach := conn.subscribe("*", "Target.detachedFromTarget", tm.forgetTarget)
+	stop := func() { stopAttach(); stopDetach() }
 	if _, err := conn.call("", "Target.setAutoAttach", autoAttachParams); err != nil {
 		stop()
-		return "", fmt.Errorf("enable auto-attach: %w", err)
+		return nil, "", fmt.Errorf("enable auto-attach: %w", err)
 	}
 	select {
 	case r := <-tm.mainPage:
 		if r.err != nil {
 			stop()
-			return "", fmt.Errorf("set up main page: %w", r.err)
+			return nil, "", fmt.Errorf("set up main page: %w", r.err)
 		}
-		return r.sessionID, nil
+		return tm, r.sessionID, nil
 	case <-time.After(15 * time.Second):
 		stop()
-		return "", fmt.Errorf("main page %s not attached within 15s", mainTarget)
+		return nil, "", fmt.Errorf("main page %s not attached within 15s", mainTarget)
 	}
 }
 
@@ -76,6 +91,11 @@ func (tm *targetManager) onAttached(_ string, params json.RawMessage) {
 		call("Runtime.runIfWaitingForDebugger", nil)
 	}
 
+	// 页面目标登记会话，供 openTab 按 targetId 取用（主页面也登记，无害）
+	if handled && kind == kindPage {
+		tm.recordPage(ev.TargetInfo.TargetID, pageSession{sessionID: ev.SessionID, err: err})
+	}
+
 	// 主页面按 targetId 认定，不取"第一个附加的页面"：启动时可能有别的页面先被附加
 	if ev.TargetInfo.TargetID == tm.mainTarget {
 		tm.mainPage <- attachResult{sessionID: ev.SessionID, err: err}
@@ -90,4 +110,49 @@ func (tm *targetManager) onAttached(_ string, params json.RawMessage) {
 // browserCall 在浏览器级会话上发命令
 func (tm *targetManager) browserCall(method string, params any) (json.RawMessage, error) {
 	return tm.conn.call("", method, params)
+}
+
+// recordPage 登记页面目标的会话，并唤醒等它的调用方
+func (tm *targetManager) recordPage(targetID string, p pageSession) {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	tm.pages[targetID] = p
+	for _, ch := range tm.waiters[targetID] {
+		ch <- p // 缓冲为 1，不会阻塞
+	}
+	delete(tm.waiters, targetID)
+}
+
+// forgetTarget 目标断开（标签页关闭等）时移除登记
+func (tm *targetManager) forgetTarget(_ string, params json.RawMessage) {
+	var ev struct {
+		TargetID string `json:"targetId"`
+	}
+	if json.Unmarshal(params, &ev) != nil {
+		return
+	}
+	tm.mu.Lock()
+	delete(tm.pages, ev.TargetID)
+	tm.mu.Unlock()
+}
+
+// waitPage 等页面目标下发完身份，返回它的会话；超时报错
+func (tm *targetManager) waitPage(targetID string, timeout time.Duration) (string, error) {
+	tm.mu.Lock()
+	if p, ok := tm.pages[targetID]; ok {
+		tm.mu.Unlock()
+		return p.sessionID, p.err
+	}
+	ch := make(chan pageSession, 1)
+	tm.waiters[targetID] = append(tm.waiters[targetID], ch)
+	tm.mu.Unlock()
+	select {
+	case p := <-ch:
+		return p.sessionID, p.err
+	case <-time.After(timeout):
+		tm.mu.Lock()
+		tm.waiters[targetID] = slices.DeleteFunc(tm.waiters[targetID], func(c chan pageSession) bool { return c == ch })
+		tm.mu.Unlock()
+		return "", fmt.Errorf("page %s not attached within %v", targetID, timeout)
+	}
 }

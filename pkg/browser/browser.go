@@ -127,9 +127,12 @@ func (bi *BrowserInstance) CreateBrowserContext(opts *BrowserContextOptions) (*B
 		opts:        nil, // Don't assume page type - will be set when needed
 	}
 
-	// Try to get options from the page if it's a CDPPage
-	if cdpPage, ok := bi.page.(*CDPPage); ok {
-		browserCtx.opts = cdpPage.opts
+	// 沿用实例的选项；CustomCDP 实例记下主页面，NewPage 经它在同一浏览器连接上开新标签页
+	switch page := bi.page.(type) {
+	case *CDPPage:
+		browserCtx.opts = page.opts
+	case *CustomCDPPage:
+		browserCtx.opts, browserCtx.custom = page.opts, page
 	}
 
 	return browserCtx, nil

@@ -438,15 +438,11 @@ func (ccc *CustomCDPConnector) Connect(ctx context.Context, chrome *ChromeProces
 		conn.close()
 		return nil, err
 	}
-	session, err := startTargetManager(conn, id, mainTarget)
+	tm, session, err := startTargetManager(conn, id, mainTarget)
 	if err != nil {
 		conn.close()
 		return nil, err
 	}
-	// 之后在本进程上开的 chromedp 页面（BrowserContext.NewPage）复用这里的信息与身份，不再自己读取和下发
-	chrome.hostMu.Lock()
-	chrome.host, chrome.managedIdentity = &host, id
-	chrome.hostMu.Unlock()
 
 	page := &CustomCDPPage{
 		client:   &CustomCDPClient{conn: conn, sessionID: session},
@@ -456,6 +452,7 @@ func (ccc *CustomCDPConnector) Connect(ctx context.Context, chrome *ChromeProces
 		cursor:   NewGhostCursor(),
 		identity: id,
 		targetID: mainTarget,
+		targets:  tm,
 	}
 	if err := page.initialize(); err != nil {
 		conn.close()
@@ -472,8 +469,10 @@ type CustomCDPPage struct {
 	ctx    context.Context
 	cursor *GhostCursor // 持久化拟人光标，避免每次点击瞬移
 
-	identity *Identity // 下发给本页的身份（SetViewport 要保留它的屏幕与 DPR）
-	targetID string    // 本页的 targetId（调整窗口用）
+	identity     *Identity      // 下发给本页的身份（SetViewport 要保留它的屏幕与 DPR）
+	targetID     string         // 本页的 targetId（调整窗口、关闭标签页用）
+	targets      *targetManager // 本浏览器的目标管理器（openTab 用）
+	closeTabOnly bool           // openTab 开出的页面：Close 只关自己的标签页，不断开浏览器连接
 
 	// 请求拦截状态
 	fetchMu         sync.Mutex
@@ -882,9 +881,53 @@ func (p *CustomCDPPage) GetURL() (string, error) {
 	return "", fmt.Errorf("failed to get URL")
 }
 
-// Close closes the custom CDP page
+// Close 关闭页面：openTab 开出的页面只关自己的标签页；主页面断开浏览器连接（随后由实例关闭 Chrome）
 func (p *CustomCDPPage) Close() error {
+	if p.closeTabOnly {
+		if _, err := p.client.conn.call("", "Target.closeTarget", map[string]any{"targetId": p.targetID}); err != nil {
+			return fmt.Errorf("close tab: %w", err)
+		}
+		return nil
+	}
 	return p.client.Close()
+}
+
+// openTab 在同一浏览器里新开标签页：目标管理器在它运行前下发与本页相同的身份，再交出会话
+func (p *CustomCDPPage) openTab() (*CustomCDPPage, error) {
+	if p.targets == nil {
+		return nil, fmt.Errorf("page has no target manager")
+	}
+	raw, err := p.client.conn.call("", "Target.createTarget", map[string]any{"url": "about:blank"})
+	if err != nil {
+		return nil, fmt.Errorf("create tab: %w", err)
+	}
+	var created struct {
+		TargetID string `json:"targetId"`
+	}
+	if err := json.Unmarshal(raw, &created); err != nil {
+		return nil, fmt.Errorf("decode tab: %w", err)
+	}
+	session, err := p.targets.waitPage(created.TargetID, 15*time.Second)
+	if err != nil {
+		p.client.conn.call("", "Target.closeTarget", map[string]any{"targetId": created.TargetID})
+		return nil, fmt.Errorf("set up tab: %w", err)
+	}
+	tab := &CustomCDPPage{
+		client:       &CustomCDPClient{conn: p.client.conn, sessionID: session},
+		chrome:       p.chrome,
+		opts:         p.opts,
+		ctx:          p.ctx,
+		cursor:       NewGhostCursor(),
+		identity:     p.identity,
+		targetID:     created.TargetID,
+		targets:      p.targets,
+		closeTabOnly: true,
+	}
+	if err := tab.initialize(); err != nil {
+		tab.Close()
+		return nil, fmt.Errorf("initialize tab: %w", err)
+	}
+	return tab, nil
 }
 
 // SetRequestInterception enables or disables request interception (Page interface).

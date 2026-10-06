@@ -376,11 +376,64 @@ func TestNewPageOnCustomCDPInstance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPage: %v", err)
 	}
-	defer np.Close()
 	if err := np.Navigate(ss.main.URL + "/plain"); err != nil {
 		t.Fatal(err)
 	}
 	if got, err := np.Evaluate(`[navigator.platform, navigator.userAgentData.platform, navigator.userAgent.includes('Windows NT')].join()`); err != nil || got != "Win32,Windows,true" {
 		t.Errorf("new page identity = %v (%v), want Win32,Windows,true", got, err)
+	}
+	if _, ok := np.(*CustomCDPPage); !ok {
+		t.Errorf("NewPage on a CustomCDP instance returned %T, want *CustomCDPPage", np)
+	}
+	// 连续开多个新页：各自拿到自己的标签页
+	var pages []Page
+	for i := range 3 {
+		p, err := bc.NewPage()
+		if err != nil {
+			t.Fatalf("NewPage #%d: %v", i, err)
+		}
+		pages = append(pages, p)
+		if err := p.Navigate(fmt.Sprintf("%s/plain?tab=%d", ss.main.URL, i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i, p := range pages {
+		if got, _ := p.Evaluate(`location.search`); got != fmt.Sprintf("?tab=%d", i) {
+			t.Errorf("tab %d sees %v", i, got)
+		}
+		if err := p.Close(); err != nil {
+			t.Errorf("close tab %d: %v", i, err)
+		}
+	}
+	// 关闭新页面不能断开浏览器连接：主页面仍可用
+	if err := np.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := inst.Page().Navigate(ss.main.URL + "/plain?main-after"); err != nil {
+		t.Fatalf("main page unusable after closing new pages: %v", err)
+	}
+	if got, _ := inst.Page().Evaluate(`location.search`); got != "?main-after" {
+		t.Errorf("main page location = %v", got)
+	}
+}
+
+// TestNewPageOnChromedpInstance chromedp 实例上的 NewPage 仍开 chromedp 页面
+func TestNewPageOnChromedpInstance(t *testing.T) {
+	inst, err := Connect(t.Context(), &ConnectOptions{Headless: true, UseChromedp: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer inst.Close()
+	bc, err := inst.CreateBrowserContext(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	np, err := bc.NewPage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer np.Close()
+	if _, ok := np.(*CDPPage); !ok {
+		t.Errorf("NewPage on a chromedp instance returned %T, want *CDPPage", np)
 	}
 }

@@ -125,6 +125,7 @@ type BrowserContext struct {
 	allocCancel context.CancelFunc
 	chrome      *ChromeProcess
 	opts        *ConnectOptions
+	custom      *CustomCDPPage // 实例是 CustomCDP 时的主页面（NewPage 经它开新标签页）
 }
 
 // ChromeProcess represents a Chrome process
@@ -138,9 +139,8 @@ type ChromeProcess struct {
 	exited          chan struct{} // 进程退出且已被 Wait 回收时关闭
 	sigterm         *sigtermOnce  // 正常退出请求只发一次（ctx 取消与 Kill 共用）
 
-	hostMu          sync.Mutex // 保护 host、managedIdentity
-	host            *hostInfo  // 真实浏览器信息缓存，见 browserHostInfo
-	managedIdentity *Identity  // 非 nil：CustomCDP 的 target manager 已接管本进程所有目标的身份下发
+	hostMu sync.Mutex // 保护 host
+	host   *hostInfo  // 真实浏览器信息缓存，见 browserHostInfo
 }
 
 // Page represents a browser page interface

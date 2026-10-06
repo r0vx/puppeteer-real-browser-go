@@ -10,6 +10,9 @@ import (
 // NewPage creates a new page in this browser context (like puppeteer context.newPage())
 // This creates a new tab/context within the browser context
 func (bc *BrowserContext) NewPage() (Page, error) {
+	if bc.custom != nil {
+		return bc.custom.openTab()
+	}
 	// Create a new chromedp context within this browser context
 	// This is equivalent to creating a new tab in the same browser context
 	tabCtx, tabCancel := chromedp.NewContext(bc.allocCtx)
