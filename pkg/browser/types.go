@@ -163,7 +163,7 @@ type Page interface {
 }
 
 // PageWithSelector extends Page with selector-based methods
-// Use type assertion to access these methods: page.(*CDPPage).ClickSelector(...)
+// 两种页面类型都实现它：page.(*CustomCDPPage)（默认通道）或 page.(*CDPPage)（UseChromedp）
 type PageWithSelector interface {
 	Page
 
@@ -199,7 +199,7 @@ type PageWithSelector interface {
 	// 便捷方法
 	ExecuteJS(script string, result interface{}) error // 执行 JS
 	Sleep(duration time.Duration)                      // 等待
-	GetContext() context.Context                       // 获取 chromedp 上下文
+	GetContext() context.Context                       // chromedp 通道返回 chromedp 上下文；CustomCDP 页面返回 context.Background()，不能拿来调用 chromedp
 
 }
 

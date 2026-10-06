@@ -11,7 +11,7 @@ type Coords struct {
 }
 
 // ClickSelector clicks an element by CSS selector
-// Works with both UseCustomCDP modes by getting coordinates first
+// 两条通道（默认 CustomCDP、UseChromedp）都可用：先取坐标再点击
 func ClickSelector(page Page, selector string) error {
 	coords, err := GetElementCoords(page, selector)
 	if err != nil {

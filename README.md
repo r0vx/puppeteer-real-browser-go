@@ -291,8 +291,12 @@ opts := &browser.ConnectOptions{
 
 ### 迁移：默认通道改为 CustomCDP（2026-10）
 - 不写通道选项时现在走 CustomCDP：主页面、跨站 iframe、Worker、弹窗都下发身份。`UseCustomCDP` 已废弃，可以删掉。
-- 需要旧的 chromedp 通道（例如 `GetContext()` 后直接调用 `chromedp.Run` / `chromedp.ListenTarget`）时，设 `UseChromedp: true`。chromedp 通道只给主页面下发身份，不防检测；CustomCDP 页面的 `GetContext()` 不是 chromedp 上下文。
+- 需要旧的 chromedp 通道时设 `UseChromedp: true`。chromedp 通道只给主页面下发身份，不防检测。以下写法依赖它：
+  - `GetContext()` 后直接调用 chromedp。CustomCDP 页面的 `GetContext()` 返回 `context.Background()`：`chromedp.Run` 会返回 `ErrInvalidContext`，**`chromedp.ListenTarget` / `chromedp.ListenBrowser` 会直接 panic**。
+  - 需要传入 chromedp 上下文的构造函数：`NewExtensionManager`、`NewAdvancedExtensionInjector`、`NewRuntimeBypass`。
 - 改用 CustomCDP 接口即可不再依赖 chromedp：`EnableNetwork`、`OnNetworkRequest`、`OnNetworkResponse`、`GetResponseBody`、`EnableFetch`、`OnRequestPaused`。
+- `CreateBrowserContext().NewPage()` 在默认通道上开的是 CustomCDP 标签页：`Close()` 只关这个标签页，`BrowserContext.Close()` 关闭它开出的全部标签页。
+- 关闭行为的改进：`BrowserInstance.Close()` 现在只向 Chrome 发一次正常退出信号。以前会发两次，第二次会让 Chrome 立即退出，持久化 profile（cookie、登录态）经常来不及落盘；已显式设 `UseCustomCDP: true` 的调用方也会受益。
 
 ## 📝 Demo Files
 

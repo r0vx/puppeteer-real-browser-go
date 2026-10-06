@@ -1349,7 +1349,8 @@ func (p *CustomCDPPage) Sleep(duration time.Duration) {
 	time.Sleep(duration)
 }
 
-// GetContext returns nil for CustomCDPPage (not using chromedp context)
+// GetContext 返回 context.Background()：CustomCDP 页面没有 chromedp 上下文，不能拿来调用 chromedp
+// （chromedp.Run 会返回错误，chromedp.ListenTarget / ListenBrowser 会 panic），需要时改用 UseChromedp
 func (p *CustomCDPPage) GetContext() context.Context {
 	return context.Background()
 }
