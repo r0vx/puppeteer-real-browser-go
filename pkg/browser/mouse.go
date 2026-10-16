@@ -9,7 +9,77 @@ import (
 
 	"github.com/chromedp/cdproto/input"
 	"github.com/chromedp/chromedp"
+	"github.com/chromedp/chromedp/kb"
 )
+
+// pressForce 按下鼠标键时的压力：真实鼠标不支持压感，按住时 PointerEvent.pressure 为 0.5；CDP 默认 force 为 0，会报 0
+const pressForce = 0.5
+
+// clickHold 鼠标按住时长：真人点击约 60–150ms
+func clickHold() time.Duration {
+	return time.Duration(60+rand.Intn(91)) * time.Millisecond
+}
+
+// snapPoint 把 CSS 坐标对齐到身份 DPR 的设备像素上：真实鼠标报告的是物理像素位置。
+// 没有身份 DPR 时按 1 取整（整数坐标落在任何整数 DPR 的像素网格上）
+func snapPoint(id *Identity, x, y float64) (float64, float64) {
+	dpr := 1.0
+	if id != nil && id.Screen.DPR > 0 {
+		dpr = id.Screen.DPR
+	}
+	return math.Round(x*dpr) / dpr, math.Round(y*dpr) / dpr
+}
+
+// keyStroke 一个按键事件与发出后的停顿
+type keyStroke struct {
+	ev    *input.DispatchKeyEventParams
+	pause time.Duration
+}
+
+// shiftKey 左 Shift 键事件：kb 表里是 VK_LSHIFT（160），真实 Chrome 的 keyCode 报 16
+func shiftKey(typ input.KeyType) *input.DispatchKeyEventParams {
+	ev := &input.DispatchKeyEventParams{Type: typ, Key: "Shift", Code: "ShiftLeft", WindowsVirtualKeyCode: 16, NativeVirtualKeyCode: 16, Location: 1}
+	if typ == input.KeyDown {
+		ev.Modifiers = input.ModifierShift
+	}
+	return ev
+}
+
+// typingStrokes 按美式键盘把文本编成真实按键：每个键带 key / code / keyCode，按住 40–100ms，键间隔 60–180ms；
+// 大写字母与上档符号先按住 Shift，连续的上档字符共用一次 Shift
+func typingStrokes(text string) []keyStroke {
+	var out []keyStroke
+	shifted := false
+	for _, r := range text {
+		k, ok := kb.Keys[r]
+		if need := ok && k.Shift; need != shifted {
+			typ := input.KeyUp
+			if need {
+				typ = input.KeyDown
+			}
+			out = append(out, keyStroke{shiftKey(typ), time.Duration(30+rand.Intn(50)) * time.Millisecond})
+			shifted = need
+		}
+		evs := kb.Encode(r) // keyDown、（可打印字符的）char、keyUp
+		for i, ev := range evs {
+			var pause time.Duration
+			switch i {
+			case len(evs) - 2: // 按住
+				pause = time.Duration(40+rand.Intn(61)) * time.Millisecond
+			case len(evs) - 1: // 到下一个键
+				pause = time.Duration(60+rand.Intn(121)) * time.Millisecond
+			}
+			out = append(out, keyStroke{ev, pause})
+		}
+	}
+	if shifted {
+		out = append(out, keyStroke{shiftKey(input.KeyUp), 0})
+	}
+	if len(out) > 0 {
+		out[len(out)-1].pause = 0
+	}
+	return out
+}
 
 // MouseTrajectory represents a point in mouse movement
 type MouseTrajectory struct {
@@ -120,13 +190,15 @@ func (gc *GhostCursor) easeInOutQuad(t float64) float64 {
 func (p *CDPPage) RealClick(x, y float64) error {
 	// Generate trajectory to target position (persistent cursor avoids teleporting)
 	trajectory := p.getCursor().GenerateTrajectory(x, y)
+	x, y = snapPoint(p.identity, x, y)
 
 	return chromedp.Run(p.ctx,
 		// Move mouse along trajectory
 		chromedp.ActionFunc(func(ctx context.Context) error {
 			for i, point := range trajectory {
 				// Move mouse to point
-				if err := input.DispatchMouseEvent(input.MouseMoved, point.X, point.Y).Do(ctx); err != nil {
+				px, py := snapPoint(p.identity, point.X, point.Y)
+				if err := input.DispatchMouseEvent(input.MouseMoved, px, py).Do(ctx); err != nil {
 					return err
 				}
 
@@ -145,23 +217,20 @@ func (p *CDPPage) RealClick(x, y float64) error {
 
 		// Perform the actual click with realistic timing
 		chromedp.ActionFunc(func(ctx context.Context) error {
-			// Mouse down
-			if err := input.DispatchMouseEvent(input.MousePressed, x, y).
-				WithButton(input.Left).
-				WithClickCount(1).Do(ctx); err != nil {
-				return err
-			}
-
-			// 优化：点击持续时间 10-60ms（之前 50-200ms）
-			clickDuration := time.Duration(10+rand.Intn(50)) * time.Millisecond
-			time.Sleep(clickDuration)
-
-			// Mouse up
-			return input.DispatchMouseEvent(input.MouseReleased, x, y).
-				WithButton(input.Left).
-				WithClickCount(1).Do(ctx)
+			return pressAndRelease(ctx, x, y)
 		}),
 	)
+}
+
+// pressAndRelease 在 (x, y) 按下并松开左键（chromedp 通道）：按下带压力，按住拟人时长
+func pressAndRelease(ctx context.Context, x, y float64) error {
+	if err := input.DispatchMouseEvent(input.MousePressed, x, y).
+		WithButton(input.Left).WithClickCount(1).WithForce(pressForce).Do(ctx); err != nil {
+		return err
+	}
+	time.Sleep(clickHold())
+	return input.DispatchMouseEvent(input.MouseReleased, x, y).
+		WithButton(input.Left).WithClickCount(1).Do(ctx)
 }
 
 // RealHover performs a realistic hover with human-like mouse movement
@@ -171,7 +240,8 @@ func (p *CDPPage) RealHover(x, y float64) error {
 	return chromedp.Run(p.ctx,
 		chromedp.ActionFunc(func(ctx context.Context) error {
 			for i, point := range trajectory {
-				if err := input.DispatchMouseEvent(input.MouseMoved, point.X, point.Y).Do(ctx); err != nil {
+				px, py := snapPoint(p.identity, point.X, point.Y)
+				if err := input.DispatchMouseEvent(input.MouseMoved, px, py).Do(ctx); err != nil {
 					return err
 				}
 
@@ -240,24 +310,15 @@ func wheelSteps(deltaX, deltaY float64) [][2]float64 {
 	return steps
 }
 
-// RealSendKeys performs realistic typing with human-like timing and variations
+// RealSendKeys 向当前焦点元素逐键输入：真实按键事件（key / code / keyCode 齐全）加拟人按住与间隔，见 typingStrokes
 func (p *CDPPage) RealSendKeys(text string) error {
 	return chromedp.Run(p.ctx,
 		chromedp.ActionFunc(func(ctx context.Context) error {
-			for _, char := range text {
-				// Type character using proper input method
-				if err := input.DispatchKeyEvent(input.KeyDown).
-					WithText(string(char)).Do(ctx); err != nil {
+			for _, s := range typingStrokes(text) {
+				if err := s.ev.Do(ctx); err != nil {
 					return err
 				}
-				if err := input.DispatchKeyEvent(input.KeyUp).
-					WithText(string(char)).Do(ctx); err != nil {
-					return err
-				}
-
-				// 优化：打字延迟 20-70ms（之前 100-250ms）
-				delay := time.Duration(20+rand.Intn(50)) * time.Millisecond
-				time.Sleep(delay)
+				time.Sleep(s.pause)
 			}
 			return nil
 		}),

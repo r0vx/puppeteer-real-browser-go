@@ -168,10 +168,10 @@ type PageWithSelector interface {
 	Page
 
 	// 选择器操作
-	ClickSelector(selector string) error     // 原生 chromedp 点击
+	ClickSelector(selector string) error     // 滚入视口后点击元素中心（不走拟人轨迹）
 	RealClickSelector(selector string) error // 拟人化贝塞尔曲线点击
-	SendKeys(selector, text string) error    // 原生 chromedp 输入
-	RealSendKeys(text string) error          // 真实键盘输入（需先获取焦点）
+	SendKeys(selector, text string) error    // 点击元素获得焦点后逐键输入（同 RealSendKeys）
+	RealSendKeys(text string) error          // 真实键盘输入，美式键盘布局（需先获取焦点）
 
 	// 等待方法
 	WaitVisible(selector string, timeout time.Duration) error    // 等待元素可见

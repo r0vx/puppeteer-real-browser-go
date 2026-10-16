@@ -249,37 +249,23 @@ func (c *CustomCDPClient) MoveMouse(x, y float64) error {
 	return err
 }
 
-// Click performs a click without Runtime.Enable
+// Click 移到 (x, y) 后按下并松开左键（不调用 Runtime.enable）
 func (c *CustomCDPClient) Click(x, y float64) error {
-	// 1. 先移动鼠标到目标位置
 	if err := c.MoveMouse(x, y); err != nil {
 		return err
 	}
+	return c.pressAndRelease(x, y)
+}
 
-	// 2. 鼠标按下
-	pressParams := map[string]interface{}{
-		"type":       "mousePressed",
-		"x":          x,
-		"y":          y,
-		"button":     "left",
-		"clickCount": 1,
-	}
-	if _, err := c.sendCommand("Input.dispatchMouseEvent", pressParams); err != nil {
+// pressAndRelease 在 (x, y) 按下并松开左键：按下带压力（真实鼠标按住时 pressure 为 0.5），按住拟人时长
+func (c *CustomCDPClient) pressAndRelease(x, y float64) error {
+	press := map[string]interface{}{"type": "mousePressed", "x": x, "y": y, "button": "left", "clickCount": 1, "force": pressForce}
+	if _, err := c.sendCommand("Input.dispatchMouseEvent", press); err != nil {
 		return err
 	}
-
-	// 3. 短暂延迟模拟真实点击
-	time.Sleep(10 * time.Millisecond)
-
-	// 4. 鼠标释放
-	releaseParams := map[string]interface{}{
-		"type":       "mouseReleased",
-		"x":          x,
-		"y":          y,
-		"button":     "left",
-		"clickCount": 1,
-	}
-	_, err := c.sendCommand("Input.dispatchMouseEvent", releaseParams)
+	time.Sleep(clickHold())
+	release := map[string]interface{}{"type": "mouseReleased", "x": x, "y": y, "button": "left", "clickCount": 1}
+	_, err := c.sendCommand("Input.dispatchMouseEvent", release)
 	return err
 }
 
@@ -296,30 +282,13 @@ func (c *CustomCDPClient) Scroll(x, y, deltaX, deltaY float64) error {
 	return err
 }
 
-// Type sends keyboard events for each character (real typing)
+// Type 向当前焦点元素逐键输入：真实按键事件（key / code / keyCode 齐全）加拟人按住与间隔，见 typingStrokes
 func (c *CustomCDPClient) Type(text string) error {
-	for _, char := range text {
-		charStr := string(char)
-
-		// KeyDown
-		keyParams := map[string]interface{}{
-			"type": "keyDown",
-			"text": charStr,
-		}
-		if _, err := c.sendCommand("Input.dispatchKeyEvent", keyParams); err != nil {
+	for _, s := range typingStrokes(text) {
+		if _, err := c.sendCommand("Input.dispatchKeyEvent", s.ev); err != nil {
 			return err
 		}
-
-		// KeyUp
-		keyUpParams := map[string]interface{}{
-			"type": "keyUp",
-		}
-		if _, err := c.sendCommand("Input.dispatchKeyEvent", keyUpParams); err != nil {
-			return err
-		}
-
-		// 模拟人类输入速度
-		time.Sleep(time.Duration(10+rand.Intn(50)) * time.Millisecond)
+		time.Sleep(s.pause)
 	}
 	return nil
 }
@@ -608,19 +577,20 @@ func (p *CustomCDPPage) navigate(url, referrer, event string, timeout time.Durat
 	})
 }
 
-// Click performs a click
+// Click 移到 (x, y) 后点击（不走拟人轨迹）；坐标对齐设备像素
 func (p *CustomCDPPage) Click(x, y float64) error {
-	return p.client.Click(x, y)
+	return p.client.Click(snapPoint(p.identity, x, y))
 }
 
 // RealClick performs a realistic click with Bezier curve mouse movement
 // 使用贝塞尔曲线进行拟人化鼠标移动后点击
 func (p *CustomCDPPage) RealClick(x, y float64) error {
 	trajectory := p.getCursor().GenerateTrajectory(x, y)
+	x, y = snapPoint(p.identity, x, y)
 
-	// 沿贝塞尔曲线轨迹移动鼠标
+	// 沿贝塞尔曲线轨迹移动鼠标（坐标对齐设备像素）
 	for i, point := range trajectory {
-		if err := p.client.MoveMouse(point.X, point.Y); err != nil {
+		if err := p.client.MoveMouse(snapPoint(p.identity, point.X, point.Y)); err != nil {
 			return err
 		}
 
@@ -635,33 +605,7 @@ func (p *CustomCDPPage) RealClick(x, y float64) error {
 		}
 	}
 
-	// 执行点击（带真实按压时长）
-	// 1. 鼠标按下
-	pressParams := map[string]interface{}{
-		"type":       "mousePressed",
-		"x":          x,
-		"y":          y,
-		"button":     "left",
-		"clickCount": 1,
-	}
-	if _, err := p.client.sendCommand("Input.dispatchMouseEvent", pressParams); err != nil {
-		return err
-	}
-
-	// 2. 真实点击持续时间 (10-60ms)
-	clickDuration := time.Duration(10+rand.Intn(50)) * time.Millisecond
-	time.Sleep(clickDuration)
-
-	// 3. 鼠标释放
-	releaseParams := map[string]interface{}{
-		"type":       "mouseReleased",
-		"x":          x,
-		"y":          y,
-		"button":     "left",
-		"clickCount": 1,
-	}
-	_, err := p.client.sendCommand("Input.dispatchMouseEvent", releaseParams)
-	return err
+	return p.client.pressAndRelease(x, y)
 }
 
 // RealHover performs realistic hover with Bezier curve mouse movement
@@ -670,7 +614,7 @@ func (p *CustomCDPPage) RealHover(x, y float64) error {
 	trajectory := p.getCursor().GenerateTrajectory(x, y)
 
 	for i, point := range trajectory {
-		if err := p.client.MoveMouse(point.X, point.Y); err != nil {
+		if err := p.client.MoveMouse(snapPoint(p.identity, point.X, point.Y)); err != nil {
 			return err
 		}
 
@@ -810,32 +754,15 @@ func (p *CustomCDPPage) RealSendKeys(text string) error {
 	return p.client.Type(text)
 }
 
-// SendKeys types text into an element
+// SendKeys 点击元素获得焦点后逐键输入（真实按键与拟人节奏，见 Type；不用 JS 改值：那样只有不可信的 input 事件、没有按键）
 func (p *CustomCDPPage) SendKeys(selector, text string) error {
-	escaped := escapeJsSelector(selector)
-	// 点击聚焦
 	if err := p.ClickSelector(selector); err != nil {
 		return err
 	}
-
-	// 输入文本
-	for _, char := range text {
-		_, err := p.Evaluate(fmt.Sprintf(`
-			(function() {
-				const elem = document.querySelector('%s');
-				if (!elem) throw new Error('Element not found');
-				elem.focus();
-				const val = elem.value || '';
-				elem.value = val + '%c';
-				elem.dispatchEvent(new Event('input', {bubbles: true}));
-			})()
-		`, escaped, char))
-		if err != nil {
-			return err
-		}
-		time.Sleep(time.Duration(10+rand.Intn(50)) * time.Millisecond)
+	if _, err := p.Evaluate(fmt.Sprintf(`document.querySelector('%s')?.focus(), true`, escapeJsSelector(selector))); err != nil {
+		return err
 	}
-	return nil
+	return p.client.Type(text)
 }
 
 // Screenshot takes a screenshot

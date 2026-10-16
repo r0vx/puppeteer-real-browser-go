@@ -12,6 +12,7 @@ import (
 	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/cdproto/dom"
 	"github.com/chromedp/cdproto/fetch"
+	"github.com/chromedp/cdproto/input"
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
@@ -243,9 +244,15 @@ func navigateAndWait(ctx context.Context, url, referrer, event string) error {
 	}
 }
 
-// Click performs a click at the specified coordinates
+// Click 移到 (x, y) 后点击（不走拟人轨迹）；坐标对齐设备像素，按下带压力并按住拟人时长
 func (p *CDPPage) Click(x, y float64) error {
-	return chromedp.Run(p.ctx, chromedp.MouseClickXY(x, y))
+	x, y = snapPoint(p.identity, x, y)
+	return chromedp.Run(p.ctx, chromedp.ActionFunc(func(ctx context.Context) error {
+		if err := input.DispatchMouseEvent(input.MouseMoved, x, y).Do(ctx); err != nil {
+			return err
+		}
+		return pressAndRelease(ctx, x, y)
+	}))
 }
 
 // Evaluate executes JavaScript using standard chromedp but with anti-detection Chrome flags
@@ -298,13 +305,27 @@ func (p *CDPPage) WaitForSelector(selector string) error {
 	return chromedp.Run(p.ctx, chromedp.WaitVisible(selector))
 }
 
-// ClickSelector clicks an element by CSS selector using chromedp native method
-// This is more reliable than coordinate-based clicking for standard elements
+// ClickSelector 等元素可见、滚入视口后点击其中心（经 Click，不用 chromedp.Click：它按下无压力、不按住）
 func (p *CDPPage) ClickSelector(selector string) error {
-	return chromedp.Run(p.ctx,
-		chromedp.WaitVisible(selector),
-		chromedp.Click(selector, chromedp.NodeVisible),
-	)
+	if err := chromedp.Run(p.ctx, chromedp.WaitVisible(selector)); err != nil {
+		return fmt.Errorf("element not visible: %w", err)
+	}
+	var c map[string]float64
+	if err := chromedp.Run(p.ctx, chromedp.Evaluate(fmt.Sprintf(`
+		(function() {
+			const elem = document.querySelector('%s');
+			if (!elem) return null;
+			elem.scrollIntoViewIfNeeded ? elem.scrollIntoViewIfNeeded() : elem.scrollIntoView({block: 'center'});
+			const rect = elem.getBoundingClientRect();
+			return {x: rect.left + rect.width/2, y: rect.top + rect.height/2};
+		})()
+	`, escapeJsSelector(selector)), &c)); err != nil {
+		return fmt.Errorf("failed to get element coords: %w", err)
+	}
+	if c == nil {
+		return fmt.Errorf("element not found: %s", selector)
+	}
+	return p.Click(c["x"], c["y"])
 }
 
 // RealClickSelector clicks an element with human-like mouse movement
@@ -347,12 +368,15 @@ func (p *CDPPage) RealClickSelector(selector string) error {
 	return p.RealClick(x, y)
 }
 
-// SendKeys types text into an element using chromedp native method
+// SendKeys 点击元素获得焦点后逐键输入（真实按键与拟人节奏，见 RealSendKeys；chromedp.SendKeys 一次性发完、不按住）
 func (p *CDPPage) SendKeys(selector, text string) error {
-	return chromedp.Run(p.ctx,
-		chromedp.WaitVisible(selector),
-		chromedp.SendKeys(selector, text),
-	)
+	if err := p.ClickSelector(selector); err != nil {
+		return err
+	}
+	if err := chromedp.Run(p.ctx, chromedp.Focus(selector)); err != nil {
+		return err
+	}
+	return p.RealSendKeys(text)
 }
 
 // Screenshot takes a screenshot of the page
