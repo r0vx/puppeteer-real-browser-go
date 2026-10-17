@@ -73,7 +73,7 @@ type ConnectOptions struct {
 	// 指纹配置文件保存目录
 	FingerprintDir string `json:"fingerprintDir"`
 
-	// Mobile 为新账号生成移动身份（安卓 Chrome；iPhone UA 为 iOS，见子项目 M3）。只对新账号起作用：已有指纹的系统永不改变，
+	// Mobile 为新账号生成移动身份：默认为安卓 Chrome，UserAgent 是 iPhone / iPad UA 时为 iPhone Safari（表面级）。只对新账号起作用：已有指纹的系统永不改变，
 	// 与已有指纹的类型不一致时 Connect 报错。需要设 FingerprintUserID，且只支持默认的 CustomCDP 通道
 	Mobile bool `json:"mobile"`
 

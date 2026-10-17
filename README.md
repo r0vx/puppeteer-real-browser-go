@@ -309,6 +309,13 @@ opts := &browser.ConnectOptions{
   - 不支持高动态范围媒体查询。
   - 详见 `docs/superpowers/specs/2026-10-17-android-identity-design.md`。
 
+### 手机身份（iPhone，表面级，2026-10）
+- `ConnectOptions{Mobile: true, UserAgent: <iPhone UA>, FingerprintUserID: "…"}` 为新账号生成 iPhone Safari 身份：Safari 的 UA（版本取自机型，不跟随宿主 Chrome）、不发 Client Hints（没有 `userAgentData`、没有 `sec-ch-ua*` 请求头）、`platform` iPhone、`vendor` Apple、广色域屏幕、Apple GPU 的 WebGL（真机实测）、Safari 的接口表面（删掉 Chrome 独有的，补上 `ApplePaySession`、`GestureEvent`、`ManagedMediaSource`、`navigator.standalone` 等）、JavaScriptCore 格式的原生函数文本；主页面、跨站 iframe、Worker、弹窗一致。
+- 机型 2 款，都是真机实测：iOS 26（Safari 26.2，420×912@3）与 iOS 18.5（Safari 18.5，440×956@3）。其余规则同安卓身份。
+- 页面操作按 iPhone 的方式：点按没有中间移动、`click` 的 `pointerType` 为 mouse；键盘按键带真实的 `key` / `code`（keydown 的 `keyCode` 229、keyup 为按键码）。
+- **只能做到表面像**，以下能识破：JS 引擎是 V8 不是 JavaScriptCore（报错文本、调用栈、数学末位精度）；TLS / HTTP2 握手是 Chrome 的；渲染引擎是 Blink。Linux 上 iOS 身份只看得到 `/usr/share/fonts/apple` 里的字体：Apple 字体授权只限 Apple 硬件，本库不提供，没有时回落到安卓字体并警告（字体探测看得出不是 iPhone）。
+- 详见 `docs/superpowers/specs/2026-10-17-ios-identity-design.md`。
+
 ## 📝 Demo Files
 
 All demo files are located in `cmd/example/`:

@@ -51,10 +51,10 @@ M3 能做到的：浏览器内可见的标识与接口表面和 iPhone Safari �
   - `MediaDevices.prototype` 上的 `getDisplayMedia`、`setCaptureHandleConfig`。
 - **补上** Safari 有、Chrome 没有的：
   - `navigator.standalone`（false）；
-  - `ApplePaySession`（`canMakePayments()` 为 false）；
+  - `ApplePaySession`（`canMakePayments()` 为 true：iPhone 都支持 Apple Pay，这个方法不检查绑卡；不安全的页面里调用报 InvalidAccessError）；
   - `GestureEvent`；
-  - `ManagedMediaSource`（`isTypeSupported` 按基准的编解码支持）；
-  - `openDatabase`（iOS 18.5 有，26 没有，按机型）。
+  - `ManagedMediaSource`：由宿主的 `MediaSource` 实现，播放器照常可用；编解码支持沿用宿主（谎报宿主解不了的格式会让网站推来放不了的视频）；
+  - `openDatabase`（两台真机都有；不实现数据库，调用时报 SecurityError）。
   - 手写接口沿用 M1 的 `fakeInterface` 与 `strip`。
 - **原生函数的 `toString`**：JavaScriptCore 的格式是 `function max() {\n    [native code]\n}`。iOS 身份下，伪装层的 `Function.prototype.toString` 把原生格式统一转为这种格式，包括伪装表里的条目。
 - `languages`：只有主语言。
@@ -68,7 +68,7 @@ M3 能做到的：浏览器内可见的标识与接口表面和 iPhone Safari �
 
 ### 4.4 字体（实现者决定：用户自备）
 
-- Apple 字体（苹方、SF 等）受授权限制，不随库分发。做法同 Windows 字体：用户自备，放在 `fonts/apple/`（git 忽略）。
+- Apple 字体（苹方、SF 等）的授权只限 Apple 硬件，本库不提供、不下载。只有确有合规授权时才放进 `/usr/share/fonts/apple`（构建上下文为 `fonts/apple/`，git 忽略）。
 - Linux 上 iOS 身份的进程用进程级 fontconfig，只看得到这些字体：
   - `sans-serif` 为 PingFang SC / Helvetica；
   - `serif` 为 Times New Roman；
@@ -82,7 +82,7 @@ M3 能做到的：浏览器内可见的标识与接口表面和 iPhone Safari �
   - 事件顺序：`pointerover` → `pointerenter` → `pointerdown` → `touchstart` → `gotpointercapture` → `pointerup` → `lostpointercapture` → `pointerout` → `pointerleave` → `touchend` → 兼容鼠标事件 → `click`；
   - 按住约 28ms，期间没有 `pointermove`；pointer 的 `pressure` 为 0、宽高 24.16；
   - **`click` 的 `pointerType` 为 `mouse`**（Chrome 为 touch），用注入脚本改写受信 `click` 的 `pointerType`；
-  - 屏幕坐标与页面坐标相同（`screenY − clientY` 为 0），触摸、指针、鼠标事件都按此处理；
+  - 屏幕坐标与页面坐标相同（`screenY − clientY` 为 0），触摸、指针、鼠标事件都按此处理（Chrome 移动模拟下触点原生多出 109，由注入脚本的 Touch 补丁改为 0）；
   - 做法：手指点按，触点半径固定 12.08、`force` 0，按住 25–60ms，不发 `touchMove`。Chrome 由半径推导 pointer 宽高、由 `force` 推导 `pressure`；iOS 的 Touch 对象 `radiusY` 0、`force` 12.08 无法同时得到，列为残余风险。
 - **打字**：iOS 键盘的组字方式，`keydown` 为 `key: 'a'`、`code: 'KeyA'`、`keyCode` 229，`keyup` 为 `keyCode` 65（按键码）。复用 M2 的组字过程，只换按键字段。真机用的是拼音键盘，组字文本带 `\u2006` 分隔；这里按拉丁字母组字，列为残余风险。
 - **滑动**：同 M2。
@@ -103,9 +103,12 @@ M3 能做到的：浏览器内可见的标识与接口表面和 iPhone Safari �
 
 ## 6. 残余风险
 
-- JavaScriptCore 与 V8 的差异：报错文本、调用栈格式、数学精度。
+- JavaScriptCore 与 V8 的差异：报错文本、调用栈格式、数学精度（`Math.tan(-1e300)` 末位不同）。
 - TLS / HTTP2 握手是 Chrome 的。
 - 渲染引擎：CSS 特性、表单控件。
 - `dynamic-range: high`；HEVC 等编解码；语音数量（真机 68–223 个，服务器 0 个）。
 - 没有自备 Apple 字体时，字体探测看得出来。
-- 触点的 `radiusY`、`force`、`pressure` 组合（4.5）。
+- 触点的 `radiusY`、`force`、`pressure` 组合（4.5）；`pointerId` 取值范围（iPhone 为十位数，Chrome 为个位数）。
+- `Accept-Language` 只有主语言（Safari 真机的请求头格式未采集）。
+- `addSourceBuffer` 返回的是 `SourceBuffer`，不是 `ManagedSourceBuffer`。
+- WebGL 扩展列表按 iPhone，其中宿主不支持的（PVRTC 等）`getExtension` 返回 null。

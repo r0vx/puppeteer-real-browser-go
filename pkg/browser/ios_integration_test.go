@@ -6,8 +6,10 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"runtime"
 	"slices"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -342,5 +344,46 @@ func TestIOSFonts(t *testing.T) {
 		if got[name] != v {
 			t.Errorf("font %q detected = %v, want %v", name, got[name], v)
 		}
+	}
+}
+
+// iosResidual 已知无法模拟、列为残余风险的项目（规格第 6 节）
+var iosResidual = map[string]string{
+	"engine.nullProperty":              "JavaScriptCore 与 V8 的报错文本不同",
+	"engine.callUndefined":             "JavaScriptCore 与 V8 的报错文本不同",
+	"engine.jsonParse":                 "JavaScriptCore 与 V8 的报错文本不同",
+	"engine.stackSample":               "JavaScriptCore 与 V8 的调用栈格式不同",
+	"engine.math.tanNeg1e300":          "JavaScriptCore 与 V8 的数学库末位精度不同",
+	"features.notificationConstructor": "ReferenceError 的文本由引擎决定",
+	"media.dynamic-range":              "宿主屏幕不支持高动态范围，CDP 不能模拟",
+	"avmedia.codecs":                   "编解码支持沿用宿主（谎报会让网站推来放不了的视频）",
+}
+
+// iosNotCompared 不属于身份、不比较的项目：用户设置、设备上的语音与媒体设备
+var iosNotCompared = []string{"media.prefers-color-scheme", "avmedia.voices", "avmedia.devices"}
+
+// TestIOSMatchesBaseline 用 iOS 26 机型跑采集页，与 iPhone 真机基准逐项比较；只跳过残余风险与不属于身份的项目，每一项都写明原因
+func TestIOSMatchesBaseline(t *testing.T) {
+	srv, _ := baselineServer(t, "", http.StatusOK)
+	got := collectOn(t, connectIOS(t, "ios-baseline", "iphone-ios26").Page(), srv)
+	_, appleFonts := os.Stat(iosFontRoots[0])
+	skip := func(path string) bool {
+		path = strings.TrimPrefix(path, ".")
+		for p := range iosResidual {
+			if path == p || strings.HasPrefix(path, p+".") {
+				return true
+			}
+		}
+		for _, p := range iosNotCompared {
+			if path == p || strings.HasPrefix(path, p+".") {
+				return true
+			}
+		}
+		return path == "fonts" && (runtime.GOOS != "linux" || appleFonts != nil) // 字体只在 Linux 上、提供了 Apple 字体时比较
+	}
+	diffs := diffBaseline(loadIOSBaseline(t, "ios-safari-iphone-2.json"), got, "", skip)
+	sort.Strings(diffs)
+	for _, d := range diffs {
+		t.Error(d)
 	}
 }
