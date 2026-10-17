@@ -268,3 +268,67 @@ func TestAndroidSurfaceAPIs(t *testing.T) {
 		}
 	})
 }
+
+// loadAndroidBaseline 读取安卓真机基准的 auto 部分
+func loadAndroidBaseline(t *testing.T) map[string]any {
+	t.Helper()
+	raw, err := os.ReadFile("../../test/baseline/android-chrome-pgkm10.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var r struct {
+		Auto map[string]any `json:"auto"`
+	}
+	if err := json.Unmarshal(raw, &r); err != nil {
+		t.Fatal(err)
+	}
+	return r.Auto
+}
+
+// collectOn 在给定页面上打开采集页（见 baseline_collector_test.go），返回 auto 结果
+func collectOn(t *testing.T, p Page, srv *httptest.Server) map[string]any {
+	t.Helper()
+	if err := p.Navigate(srv.URL); err != nil {
+		t.Fatal(err)
+	}
+	waitBaselineState(t, p, "ready")
+	raw, err := p.Evaluate(`JSON.stringify(window.__baselineAuto)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var auto map[string]any
+	if err := json.Unmarshal([]byte(fmt.Sprint(raw)), &auto); err != nil {
+		t.Fatal(err)
+	}
+	return auto
+}
+
+// TestAndroidWebGL WebGL1 / WebGL2 的标识、能力参数、精度、扩展列表与真机一致；手机上没有的扩展取不到，也不会被悄悄启用（Review Focus 4）
+func TestAndroidWebGL(t *testing.T) {
+	srv, _ := baselineServer(t, "", http.StatusOK)
+	p := connectAndroid(t, "android-webgl", "PGKM10").Page()
+	got, want := collectOn(t, p, srv), loadAndroidBaseline(t)
+	for _, kind := range []string{"webgl", "webgl2"} {
+		g, w := got[kind].(map[string]any), want[kind].(map[string]any)
+		for _, k := range []string{"vendor", "renderer", "unmaskedVendor", "unmaskedRenderer", "version", "shadingLanguageVersion", "precision", "extensions"} {
+			if fmt.Sprint(g[k]) != fmt.Sprint(w[k]) {
+				t.Errorf("%s.%s = %v, want %v", kind, k, g[k], w[k])
+			}
+		}
+		gp, wp := g["params"].(map[string]any), w["params"].(map[string]any)
+		for k, v := range wp {
+			if fmt.Sprint(gp[k]) != fmt.Sprint(v) {
+				t.Errorf("%s.params.%s = %v, want %v", kind, k, gp[k], v)
+			}
+		}
+	}
+	// 手机上没有的扩展：取不到，枚举值也不可用
+	probe := `(() => { const gl = document.createElement('canvas').getContext('webgl');
+	  const s3tc = gl.getExtension('WEBGL_compressed_texture_s3tc'), float = gl.getExtension('OES_texture_float'), aniso = gl.getExtension('EXT_texture_filter_anisotropic');
+	  gl.bindTexture(gl.TEXTURE_2D, gl.createTexture());
+	  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.FLOAT, null);
+	  return [s3tc === null, float === null, aniso !== null, gl.getError() !== 0].join(); })()`
+	if v, _ := p.Evaluate(probe); v != "true,true,true,true" {
+		t.Errorf("extension probe = %v, want true,true,true,true", v)
+	}
+}

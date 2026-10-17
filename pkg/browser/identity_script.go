@@ -2,6 +2,7 @@ package browser
 
 import (
 	"encoding/json"
+	"strconv"
 )
 
 // jsIdentity 注入脚本使用的身份子集，以 JSON 嵌入脚本
@@ -33,11 +34,27 @@ type jsScreen struct {
 	DPR         float64 `json:"dpr"`
 }
 
-// jsWebGL 显卡标识与 getParameter 覆盖表（键为十进制 GLenum，值为数值或 [a, b]）
+// jsWebGL 显卡标识与 getParameter 覆盖表（键为十进制 GLenum，值为数值或 [a, b]）；手机 GPU 另有只属于 WebGL2 的参数、扩展列表与着色器精度
 type jsWebGL struct {
-	Vendor   string         `json:"vendor"`
-	Renderer string         `json:"renderer"`
-	Params   map[string]any `json:"params,omitempty"`
+	Vendor      string            `json:"vendor"`
+	Renderer    string            `json:"renderer"`
+	Params      map[string]any    `json:"params,omitempty"`
+	Params2     map[string]any    `json:"params2,omitempty"`
+	Extensions  []string          `json:"extensions,omitempty"`
+	Extensions2 []string          `json:"extensions2,omitempty"`
+	Precision   map[string][3]int `json:"precision,omitempty"` // "着色器.精度类型" → [rangeMin, rangeMax, precision]
+}
+
+// glParamTable GLenum 为键的参数表转为脚本用的十进制字符串键
+func glParamTable(m map[int]any) map[string]any {
+	if len(m) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(m))
+	for k, v := range m {
+		out[strconv.Itoa(k)] = v
+	}
+	return out
 }
 
 // webglParams 能力参数转为 getParameter 覆盖表
@@ -77,7 +94,16 @@ func identityScript(id *Identity, worker bool) string {
 		cfg.Android = &jsAndroid{DeviceMemory: id.DeviceMemory, Battery: id.Battery}
 	}
 	if id.GPU != nil {
-		cfg.WebGL = &jsWebGL{Vendor: id.GPU.Vendor, Renderer: id.GPU.Renderer, Params: webglParams(id.GPU.Caps)}
+		w := &jsWebGL{Vendor: id.GPU.Vendor, Renderer: id.GPU.Renderer, Params: webglParams(id.GPU.Caps)}
+		if m := id.GPU.Mobile; m != nil {
+			w.Params, w.Params2 = glParamTable(m.Params), glParamTable(m.Params2)
+			w.Extensions, w.Extensions2 = m.Extensions, m.Extensions2
+			w.Precision = make(map[string][3]int, len(m.Precision))
+			for k, v := range m.Precision {
+				w.Precision[strconv.Itoa(k[0])+"."+strconv.Itoa(k[1])] = v
+			}
+		}
+		cfg.WebGL = w
 	}
 	data, _ := json.Marshal(cfg) // 只含基本类型，不会失败
 	body := jsWindowPart
@@ -158,20 +184,37 @@ const noisePixels = (data, width, x0, y0) => {
 // jsCommonPart 页面与 Worker 都有的部分：WebGL 标识 / 能力参数与 readPixels 噪声、OffscreenCanvas 噪声
 const jsCommonPart = `
 if (C.webgl) {
-  const W = C.webgl, P = W.params || {};
-  for (const Ctx of [G.WebGLRenderingContext, G.WebGL2RenderingContext]) {
+  const W = C.webgl, P = W.params || {}, P2 = W.params2 || {};
+  const GL2 = G.WebGL2RenderingContext;
+  const has = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+  for (const Ctx of [G.WebGLRenderingContext, GL2]) {
     if (!Ctx) continue;
+    const is2 = Ctx === GL2;
     patchMethod(Ctx.prototype, 'getParameter', (orig, self, args) => {
       const value = Reflect.apply(orig, self, args);
       const p = args[0];
       if (p === 37445) return value === null ? value : W.vendor;
       if (p === 37446) return value === null ? value : W.renderer;
-      if (Object.prototype.hasOwnProperty.call(P, p)) {
-        const v = P[p];
+      const table = is2 && has(P2, p) ? P2 : P;
+      if (has(table, p)) {
+        const v = table[p];
         return Array.isArray(v) ? (p === 3386 ? new Int32Array(v) : new Float32Array(v)) : v;
       }
       return value;
     });
+    // 手机 GPU：扩展列表按真机；不在列表里的扩展取不到，也不调用原生（否则会在上下文里悄悄启用）
+    const exts = is2 ? W.extensions2 : W.extensions;
+    if (exts) {
+      const allowed = new Set(exts.map(e => e.toLowerCase()));
+      patchMethod(Ctx.prototype, 'getSupportedExtensions', (orig, self, args) => {
+        const list = Reflect.apply(orig, self, args);
+        return list === null ? null : exts.slice();
+      });
+      patchMethod(Ctx.prototype, 'getExtension', (orig, self, args) => {
+        if (!(self instanceof Ctx) || !args.length || allowed.has(String(args[0]).toLowerCase())) return Reflect.apply(orig, self, args);
+        return null;
+      });
+    }
     if (C.seed) {
       patchMethod(Ctx.prototype, 'readPixels', (orig, self, args) => {
         const out = Reflect.apply(orig, self, args);
@@ -180,6 +223,22 @@ if (C.webgl) {
         return out;
       });
     }
+  }
+  // 手机 GPU 的着色器精度：按对象替换 WebGLShaderPrecisionFormat 的三个取值
+  if (W.precision && G.WebGLShaderPrecisionFormat) {
+    const over = new WeakMap();
+    for (const Ctx of [G.WebGLRenderingContext, GL2]) {
+      if (!Ctx) continue;
+      patchMethod(Ctx.prototype, 'getShaderPrecisionFormat', (orig, self, args) => {
+        const f = Reflect.apply(orig, self, args);
+        const v = f && W.precision[args[0] + '.' + args[1]];
+        if (v) over.set(f, v);
+        return f;
+      });
+    }
+    ['rangeMin', 'rangeMax', 'precision'].forEach((k, i) => {
+      patchGetter(WebGLShaderPrecisionFormat.prototype, k, (orig, self) => over.has(self) ? over.get(self)[i] : Reflect.apply(orig, self, []));
+    });
   }
 }
 if (C.seed && G.OffscreenCanvas && G.OffscreenCanvasRenderingContext2D) {
