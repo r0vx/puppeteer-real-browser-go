@@ -577,14 +577,31 @@ func (p *CustomCDPPage) navigate(url, referrer, event string, timeout time.Durat
 	})
 }
 
-// Click 移到 (x, y) 后点击（不走拟人轨迹）；坐标对齐设备像素
+// mobileSend 手机身份时返回发送 CDP 命令的函数（输入改走手指与输入法），桌面身份返回 nil
+func (p *CustomCDPPage) mobileSend() cdpSend {
+	if p.identity == nil || !p.identity.Screen.Mobile {
+		return nil
+	}
+	return func(method string, params any) error {
+		_, err := p.client.sendCommand(method, params)
+		return err
+	}
+}
+
+// Click 移到 (x, y) 后点击（不走拟人轨迹）；坐标对齐设备像素；手机身份为手指点按
 func (p *CustomCDPPage) Click(x, y float64) error {
+	if send := p.mobileSend(); send != nil {
+		return mobileTap(send, x, y) // 手机：手指点按（没有鼠标轨迹）
+	}
 	return p.client.Click(snapPoint(p.identity, x, y))
 }
 
 // RealClick performs a realistic click with Bezier curve mouse movement
 // 使用贝塞尔曲线进行拟人化鼠标移动后点击
 func (p *CustomCDPPage) RealClick(x, y float64) error {
+	if send := p.mobileSend(); send != nil {
+		return mobileTap(send, x, y) // 手机：手指点按（没有鼠标轨迹）
+	}
 	trajectory := p.getCursor().GenerateTrajectory(x, y)
 	x, y = snapPoint(p.identity, x, y)
 
@@ -611,6 +628,9 @@ func (p *CustomCDPPage) RealClick(x, y float64) error {
 // RealHover performs realistic hover with Bezier curve mouse movement
 // 使用贝塞尔曲线进行拟人化鼠标悬停
 func (p *CustomCDPPage) RealHover(x, y float64) error {
+	if p.mobileSend() != nil {
+		return nil // 触屏没有悬停
+	}
 	trajectory := p.getCursor().GenerateTrajectory(x, y)
 
 	for i, point := range trajectory {
@@ -634,6 +654,10 @@ func (p *CustomCDPPage) RealHover(x, y float64) error {
 // 真实滚轮会分多次小步触发，单次整块 delta 是机器人特征，
 // 因此拆成 ~100px 的多个抖动小步并加步间延迟。
 func (p *CustomCDPPage) RealScroll(deltaX, deltaY float64) error {
+	if send := p.mobileSend(); send != nil {
+		s := p.identity.Screen
+		return mobileScroll(send, s.InnerWidth, s.InnerHeight, deltaX, deltaY) // 手机：手指拖动
+	}
 	steps := wheelSteps(deltaX, deltaY)
 	for i, s := range steps {
 		if err := p.client.Scroll(0, 0, s[0], s[1]); err != nil {
@@ -749,8 +773,11 @@ func (p *CustomCDPPage) RealClickSelector(selector string) error {
 	return p.RealClick(x, y)
 }
 
-// RealSendKeys types text using real keyboard events (maintains focus)
+// RealSendKeys 向当前焦点元素逐键输入：桌面为真实按键（key / code / keyCode 齐全），手机为输入法组字，见 Type 与 mobileType
 func (p *CustomCDPPage) RealSendKeys(text string) error {
+	if send := p.mobileSend(); send != nil {
+		return mobileType(send, text)
+	}
 	return p.client.Type(text)
 }
 
@@ -762,7 +789,7 @@ func (p *CustomCDPPage) SendKeys(selector, text string) error {
 	if _, err := p.Evaluate(fmt.Sprintf(`document.querySelector('%s')?.focus(), true`, escapeJsSelector(selector))); err != nil {
 		return err
 	}
-	return p.client.Type(text)
+	return p.RealSendKeys(text)
 }
 
 // Screenshot takes a screenshot

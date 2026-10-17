@@ -1,0 +1,233 @@
+package browser
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"slices"
+	"sort"
+	"strings"
+	"testing"
+	"time"
+)
+
+// tapSequence 一步里的事件类型序列：去掉 pointerrawupdate（是否触发取决于硬件采样），连续重复的类型只留一个
+func tapSequence(events []map[string]any, step string) []string {
+	var out []string
+	for _, e := range events {
+		typ := fmt.Sprint(e["type"])
+		if e["step"] != step || typ == "pointerrawupdate" {
+			continue
+		}
+		if len(out) == 0 || out[len(out)-1] != typ {
+			out = append(out, typ)
+		}
+	}
+	return out
+}
+
+// firstOf 一步里第一个指定类型的事件
+func firstOf(events []map[string]any, step, typ string) map[string]any {
+	for _, e := range events {
+		if e["step"] == step && e["type"] == typ {
+			return e
+		}
+	}
+	return nil
+}
+
+// baselineInteraction 读取安卓真机基准的交互记录
+func baselineInteraction(t *testing.T) []map[string]any {
+	t.Helper()
+	raw, err := os.ReadFile("../../test/baseline/android-chrome-pgkm10.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var r struct {
+		Interaction struct {
+			Events []map[string]any `json:"events"`
+		} `json:"interaction"`
+	}
+	if err := json.Unmarshal(raw, &r); err != nil {
+		t.Fatal(err)
+	}
+	return r.Interaction.Events
+}
+
+// TestAndroidTapAndTypeMatchBaseline 在采集页上用库的方法点按钮、输入 ab1，与真机的事件序列与属性比较；
+// RealHover 在手机上不产生指针事件（Review Focus 1、2、5）
+func TestAndroidTapAndTypeMatchBaseline(t *testing.T) {
+	srv, posted := baselineServer(t, "", http.StatusOK)
+	p := connectAndroid(t, "android-input", "PGKM10").Page()
+	sp := p.(*CustomCDPPage) // 手机身份只走默认通道
+	collectOn(t, p, srv)
+	if err := sp.RealHover(50, 50); err != nil {
+		t.Fatal(err)
+	}
+	if err := sp.ClickSelector("#tap-btn"); err != nil {
+		t.Fatal(err)
+	}
+	if err := sp.SendKeys("#type-input", "ab1"); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(300 * time.Millisecond)
+	if v, _ := p.Evaluate(`document.getElementById('type-input').value`); v != "ab1" {
+		t.Errorf("input value %v, want ab1", v)
+	}
+	if _, err := p.Evaluate(`window.finishBaseline(), true`); err != nil {
+		t.Fatal(err)
+	}
+	var body struct {
+		Interaction struct {
+			Events []map[string]any `json:"events"`
+		} `json:"interaction"`
+	}
+	select {
+	case raw := <-posted:
+		if err := json.Unmarshal(raw, &body); err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("nothing posted")
+	}
+	got, want := body.Interaction.Events, baselineInteraction(t)
+
+	// RealHover 在第一次点按之前调用：在那之前不能有任何指针事件
+	for _, e := range got {
+		if e["step"] == "tap" {
+			break
+		}
+		if strings.HasPrefix(fmt.Sprint(e["type"]), "pointer") {
+			t.Errorf("RealHover on a phone produced %v", e["type"])
+		}
+	}
+	if g, w := tapSequence(got, "tap"), tapSequence(want, "tap"); !slices.Equal(g, w) {
+		t.Errorf("tap sequence\n %v\nwant\n %v", g, w)
+	}
+	down, up, click := firstOf(got, "tap", "pointerdown"), firstOf(got, "tap", "pointerup"), firstOf(got, "tap", "click")
+	if down == nil || up == nil || click == nil {
+		t.Fatalf("tap incomplete: down %v up %v click %v", down, up, click)
+	}
+	if down["pointerType"] != "touch" || down["pressure"] != 1.0 || down["width"].(float64) >= 1 || down["isPrimary"] != true {
+		t.Errorf("pointerdown %v", down)
+	}
+	if up["pressure"] != 0.0 || click["pointerType"] != "touch" {
+		t.Errorf("pointerup %v / click %v", up, click)
+	}
+	if hold := up["rt"].(float64) - down["rt"].(float64); hold < 50 || hold > 150 {
+		t.Errorf("finger held %.0fms, want 50–150ms", hold)
+	}
+
+	var updates []string
+	for _, e := range got {
+		if e["step"] != "type" {
+			continue
+		}
+		switch e["type"] {
+		case "keydown", "keyup":
+			if e["key"] != "Unidentified" || e["code"] != "" || e["keyCode"] != 229.0 {
+				t.Errorf("%s %v, want Unidentified / \"\" / 229", e["type"], e)
+			}
+		case "compositionupdate":
+			updates = append(updates, fmt.Sprint(e["data"]))
+		case "beforeinput":
+			if e["inputType"] != "insertCompositionText" && e["inputType"] != "insertFromComposition" && e["inputType"] != "deleteCompositionText" {
+				t.Errorf("beforeinput %v", e["inputType"])
+			}
+		}
+	}
+	if strings.Join(updates, ",") != "a,ab,ab1" {
+		t.Errorf("composition updates %v, want a,ab,ab1", updates)
+	}
+	if firstOf(got, "type", "compositionstart") == nil {
+		t.Error("no compositionstart")
+	}
+}
+
+// swipePage 可以滚动的长页面，记录触摸与指针取消事件
+const swipePage = `<!doctype html><meta name="viewport" content="width=device-width, initial-scale=1">
+<div style="height: 4000px; background: linear-gradient(#eef, #fee)"></div>
+<script>
+window.__t = [];
+for (const type of ['touchstart', 'touchmove', 'touchend', 'pointercancel'])
+  addEventListener(type, e => window.__t.push({type: e.type, cancelable: e.cancelable, t: performance.now()}), {passive: true});
+</script>`
+
+// TestAndroidSwipeScrolls 手机上 RealScroll 是手指拖动：有 touchstart / touchmove / touchend 与 pointercancel，
+// touchmove 全部不可取消、间隔约 16ms，最终滚动距离接近请求值（Review Focus 3）
+func TestAndroidSwipeScrolls(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, swipePage) }))
+	defer srv.Close()
+	p := connectAndroid(t, "android-swipe", "PGKM10").Page()
+	if err := p.Navigate(srv.URL); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.(*CustomCDPPage).RealScroll(0, 900); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(500 * time.Millisecond)
+	if y, _ := p.Evaluate(`scrollY`); y.(float64) < 900*0.7 || y.(float64) > 900*1.3 {
+		t.Errorf("scrollY = %v after RealScroll(0, 900)", y)
+	}
+	raw, _ := p.Evaluate(`JSON.stringify(window.__t)`)
+	var events []map[string]any
+	json.Unmarshal([]byte(fmt.Sprint(raw)), &events)
+	counts := map[string]int{}
+	var moves []float64
+	for _, e := range events {
+		counts[fmt.Sprint(e["type"])]++
+		if e["type"] == "touchmove" {
+			if e["cancelable"] != false {
+				t.Errorf("touchmove cancelable = %v", e["cancelable"])
+			}
+			moves = append(moves, e["t"].(float64))
+		}
+	}
+	if counts["touchstart"] < 2 || counts["touchend"] != counts["touchstart"] || counts["pointercancel"] == 0 || len(moves) < 10 {
+		t.Errorf("event counts %v", counts)
+	}
+	var gaps []float64
+	for i := 1; i < len(moves); i++ {
+		if d := moves[i] - moves[i-1]; d < 100 { // 跳过两次拖动之间的停顿
+			gaps = append(gaps, d)
+		}
+	}
+	sort.Float64s(gaps)
+	if len(gaps) == 0 || gaps[len(gaps)/2] < 12 || gaps[len(gaps)/2] > 24 {
+		t.Errorf("median touchmove gap %v, want 12–24ms", gaps)
+	}
+}
+
+// enterPage 一个输入框，记录按键与 beforeinput
+const enterPage = `<!doctype html><meta name="viewport" content="width=device-width, initial-scale=1">
+<input id=i style="font-size: 18px">
+<script>
+window.__k = [];
+for (const type of ['keydown', 'keypress', 'keyup', 'beforeinput'])
+  addEventListener(type, e => window.__k.push([e.type, e.key || '', e.code || '', e.keyCode || 0, e.inputType || ''].join('|')), true);
+</script>`
+
+// TestAndroidEnterKey 换行是真机那样的 Enter 键：key Enter、code 为空、keyCode 13，并产生 insertLineBreak
+func TestAndroidEnterKey(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, enterPage) }))
+	defer srv.Close()
+	p := connectAndroid(t, "android-enter", "PGKM10").Page()
+	if err := p.Navigate(srv.URL); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.(PageWithSelector).SendKeys("#i", "x\n"); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := p.Evaluate(`window.__k.join(',')`)
+	got := fmt.Sprint(raw)
+	for _, want := range []string{"keydown|Enter||13|", "keypress|Enter||13|", "beforeinput|||0|insertLineBreak", "keyup|Enter||13|"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("events %s lack %s", got, want)
+		}
+	}
+	if v, _ := p.Evaluate(`document.getElementById('i').value`); v != "x" {
+		t.Errorf("input value %v, want x", v)
+	}
+}

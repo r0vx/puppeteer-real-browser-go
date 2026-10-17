@@ -3,6 +3,7 @@ package browser
 import (
 	"math"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -12,12 +13,15 @@ type sentCDP struct {
 	Params map[string]any
 }
 
-// recordCDP 记录发出的 CDP 命令，不真正发送
+// recordCDP 记录发出的 CDP 命令，不真正发送（滑动会并发发送，记录时加锁）
 func recordCDP() (cdpSend, *[]sentCDP) {
+	var mu sync.Mutex
 	var log []sentCDP
 	return func(method string, params any) error {
 		p, _ := params.(map[string]any)
+		mu.Lock()
 		log = append(log, sentCDP{method, p})
+		mu.Unlock()
 		return nil
 	}, &log
 }
@@ -50,7 +54,8 @@ func TestMobileTapSequence(t *testing.T) {
 	first := touchPointOf((*log)[0])
 	for i, c := range (*log)[:3] {
 		p := touchPointOf(c)
-		if p["radiusX"] != tapRadii[i] || p["radiusY"] != tapRadii[i] || p["x"] != first["x"] || p["y"] != first["y"] {
+		// 按住时只有 1/24 像素级的抖动（真机实测位置不变；Chrome 需要一点位移才生成 pointermove）
+		if p["radiusX"] != tapRadii[i] || p["radiusY"] != tapRadii[i] || math.Abs(p["x"].(float64)-first["x"].(float64)) > 0.1 || p["y"] != first["y"] {
 			t.Errorf("touch %d = %v", i, p)
 		}
 	}
@@ -70,15 +75,15 @@ func imeKeyOK(c sentCDP, typ string) bool {
 		c.Params["code"] == "" && c.Params["windowsVirtualKeyCode"] == 229
 }
 
-// TestMobileTypeSequence 组字输入：每个字 keydown(229) → 组字为当前整个词 → keyup(229)，最后提交整个词
+// TestMobileTypeSequence 组字输入：每个字 keydown(229) → 组字为当前整个词 → keyup(229)；结束时不提交（与真机一样留到失去焦点）
 func TestMobileTypeSequence(t *testing.T) {
 	send, log := recordCDP()
 	if err := mobileType(send, "ab1"); err != nil {
 		t.Fatal(err)
 	}
 	l := *log
-	if len(l) != 10 {
-		t.Fatalf("%d commands, want 10: %v", len(l), l)
+	if len(l) != 9 {
+		t.Fatalf("%d commands, want 9: %v", len(l), l)
 	}
 	for i, want := range []string{"a", "ab", "ab1"} {
 		down, comp, up := l[i*3], l[i*3+1], l[i*3+2]
@@ -88,9 +93,6 @@ func TestMobileTypeSequence(t *testing.T) {
 		if comp.Method != "Input.imeSetComposition" || comp.Params["text"] != want || comp.Params["selectionStart"] != len(want) {
 			t.Errorf("char %d composition %v", i, comp)
 		}
-	}
-	if c := l[9]; c.Method != "Input.insertText" || c.Params["text"] != "ab1" {
-		t.Errorf("commit %v", c)
 	}
 }
 

@@ -3,6 +3,7 @@ package browser
 import (
 	"math"
 	"math/rand"
+	"sync"
 	"time"
 	"unicode/utf16"
 )
@@ -40,16 +41,17 @@ func touchEvent(typ string, x, y, radius float64) map[string]any {
 	return map[string]any{"type": typ, "touchPoints": points}
 }
 
-// mobileTap 一次手指点按：按下、接触面两次变大、抬起（按住约 70–130ms，真机约 90ms）
+// mobileTap 一次手指点按：按下、接触面两次变大、抬起（按住约 70–130ms，真机约 90ms）。
+// 按住时手指有 1/24 像素级的抖动：位置完全不变时 Chrome 不为接触面变化生成 pointermove，真机会生成
 func mobileTap(send cdpSend, x, y float64) error {
 	x, y = fingerJitter(x), fingerJitter(y)
-	waits := []time.Duration{between(30, 60), between(30, 50), between(8, 25)}
+	waits := []time.Duration{between(30, 60), between(30, 50), between(18, 30)}
 	for i, r := range tapRadii {
-		typ := "touchMove"
+		typ, px, py := "touchMove", x+float64(1+rand.Intn(2))/24, y
 		if i == 0 {
-			typ = "touchStart"
+			typ, px = "touchStart", x
 		}
-		if err := send("Input.dispatchTouchEvent", touchEvent(typ, x, y, r)); err != nil {
+		if err := send("Input.dispatchTouchEvent", touchEvent(typ, px, py, r)); err != nil {
 			return err
 		}
 		time.Sleep(waits[i])
@@ -64,12 +66,25 @@ func mobileSwipe(send cdpSend, x0, y0, x1, y1 float64) error {
 		return err
 	}
 	steps := 8 + rand.Intn(8) // 128–240ms
+	// 按 16ms 节拍发出，不等上一条的确认：确认要等浏览器处理完一帧，逐条等待会把间隔拉长到 33ms。
+	// 同一连接按写入顺序处理命令，节拍间隔远大于写入耗时，顺序不会乱
+	start := time.Now()
+	var wg sync.WaitGroup
+	errs := make(chan error, steps)
 	for i := 1; i <= steps; i++ {
-		time.Sleep(16 * time.Millisecond)
+		time.Sleep(time.Until(start.Add(time.Duration(i) * 16 * time.Millisecond)))
 		e := 1 - math.Pow(1-float64(i)/float64(steps), 3)
-		if err := send("Input.dispatchTouchEvent", touchEvent("touchMove", subPixel(x0+(x1-x0)*e), subPixel(y0+(y1-y0)*e), tapRadii[2])); err != nil {
-			return err
-		}
+		move := touchEvent("touchMove", subPixel(x0+(x1-x0)*e), subPixel(y0+(y1-y0)*e), tapRadii[2])
+		wg.Go(func() {
+			if err := send("Input.dispatchTouchEvent", move); err != nil {
+				errs <- err
+			}
+		})
+	}
+	wg.Wait()
+	close(errs)
+	if err := <-errs; err != nil {
+		return err
 	}
 	time.Sleep(between(110, 160))
 	return send("Input.dispatchTouchEvent", touchEvent("touchEnd", x1, y1, 0))
@@ -112,7 +127,7 @@ func enterKey(send cdpSend) error {
 }
 
 // mobileType 按手机输入法的组字方式输入：每个字是 keydown（229）→ 组字更新为当前整个词 → keyup（229）；
-// 空格与换行先提交当前词；文本结束时提交，输入框里的值就是 text
+// 空格与换行先提交当前词。文本结束时不提交：与真机一样，组字留到失去焦点时由浏览器结束（输入框的值此时已经是 text）
 func mobileType(send cdpSend, text string) error {
 	var word []rune
 	commit := func() error {
@@ -166,5 +181,5 @@ func mobileType(send cdpSend, text string) error {
 			}
 		}
 	}
-	return commit()
+	return nil
 }
