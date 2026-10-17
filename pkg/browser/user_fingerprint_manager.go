@@ -96,6 +96,15 @@ func (ufm *UserFingerprintManager) GetOrCreateUserFingerprint(userID string, ini
 		if err := json.Unmarshal(raw, config); err != nil {
 			return nil, fmt.Errorf("load fingerprint %s: parse %s: %w", userID, configPath, err)
 		}
+		// 规范化之前检查，出错时一个字节都不改：不认识的设备类型（更新的版本写的）、与要求的设备类型不一致
+		if config.Device != nil && !knownDeviceKind(config.Device.Kind) {
+			return nil, fmt.Errorf("load fingerprint %s: unknown device kind %q (written by a newer version?)", userID, config.Device.Kind)
+		}
+		if initParams != nil {
+			if err := deviceMismatch(userID, config, initParams.Mobile); err != nil {
+				return nil, err
+			}
+		}
 		if config.Normalize() {
 			// 合并回原内容再写：规格要求不认识的旧字段保留不删
 			merged, err := mergeFingerprintJSON(raw, config)

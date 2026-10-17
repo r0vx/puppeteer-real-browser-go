@@ -240,3 +240,39 @@ func TestAddEnabledFeature(t *testing.T) {
 		t.Errorf("added %v", got)
 	}
 }
+
+// TestFingerprintRejectsUnknownDeviceKind 不认识的设备类型（例如更新的版本写的）：加载报错，不规范化、不回写
+func TestFingerprintRejectsUnknownDeviceKind(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "k1.json")
+	raw := []byte(`{"user_id": "k1", "device": {"kind": "watch", "model": "X"}, "browser": {"user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"}}`)
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m, err := NewUserFingerprintManager(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.GetOrCreateUserFingerprint("k1", nil); err == nil || !strings.Contains(err.Error(), "watch") {
+		t.Errorf("err = %v, want an unknown device kind error", err)
+	}
+	if after, _ := os.ReadFile(path); !bytes.Equal(after, raw) {
+		t.Error("file with an unknown device kind was rewritten")
+	}
+}
+
+// TestMobileMismatchLeavesLegacyFileUntouched 未规范化的老桌面文件配 Mobile：报错，且规范化回写也不发生（Review Focus 2）
+func TestMobileMismatchLeavesLegacyFileUntouched(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "legacy.json")
+	raw := []byte(`{"user_id": "legacy", "browser": {"user_agent": "` + iphoneTestUA + `", "language": "zh-CN"}, "screen": {"width": 390, "height": 844}}`)
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fingerprintForOptions(&ConnectOptions{FingerprintUserID: "legacy", FingerprintDir: dir, Mobile: true}); err == nil || !strings.Contains(err.Error(), "desktop identity") {
+		t.Errorf("err = %v", err)
+	}
+	if after, _ := os.ReadFile(path); !bytes.Equal(after, raw) {
+		t.Errorf("legacy file rewritten before the mismatch was reported:\n%s", after)
+	}
+}

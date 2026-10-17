@@ -262,13 +262,10 @@ func fingerprintForOptions(opts *ConnectOptions) (*FingerprintConfig, error) {
 	if err != nil {
 		return nil, err
 	}
-	// 同一账号 ID 只能是一种设备：用错类型时报错，不改文件（避免账号的设备在电脑和手机之间跳变）
-	if mobile := cfg.Device != nil; mobile != opts.Mobile {
-		kind := "desktop"
-		if mobile {
-			kind = "mobile"
-		}
-		return nil, fmt.Errorf("fingerprint %s is a %s identity but ConnectOptions.Mobile is %v", opts.FingerprintUserID, kind, opts.Mobile)
+	// 同一账号 ID 只能是一种设备：用错类型时报错（避免账号的设备在电脑和手机之间跳变）。
+	// 带 Mobile 的调用在加载时就已检查、不会回写；这里兜住不带初始化参数的调用
+	if err := deviceMismatch(opts.FingerprintUserID, cfg, opts.Mobile); err != nil {
+		return nil, err
 	}
 	return cfg, nil
 }

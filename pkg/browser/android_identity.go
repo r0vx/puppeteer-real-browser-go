@@ -221,3 +221,20 @@ func addEnabledFeature(flags []string, feature string) []string {
 	}
 	return append(flags, "--enable-features="+feature)
 }
+
+// knownDeviceKind 本版本认识的移动设备类型；更新的版本写的类型不能按桌面规范化回写，否则会毁掉那份指纹
+func knownDeviceKind(kind string) bool {
+	return kind == deviceKindAndroid
+}
+
+// deviceMismatch 账号指纹的设备类型与 ConnectOptions.Mobile 不一致时的错误（同一账号 ID 只能是一种设备）
+func deviceMismatch(userID string, cfg *FingerprintConfig, mobile bool) error {
+	if isMobile := cfg.Device != nil; isMobile != mobile {
+		kind := "desktop"
+		if isMobile {
+			kind = "mobile"
+		}
+		return fmt.Errorf("fingerprint %s is a %s identity but ConnectOptions.Mobile is %v", userID, kind, mobile)
+	}
+	return nil
+}
