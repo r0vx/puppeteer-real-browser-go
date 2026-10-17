@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -100,8 +101,35 @@ func (cl *ChromeLauncher) Launch(ctx context.Context, opts *ConnectOptions) (*Ch
 	//	fmt.Printf("  [%d] %s\n", i, flag)
 	// }
 
+	// 手机身份（Linux）：进程级字体配置，只看得到安卓字体；桌面身份仍用系统配置
+	fontDir, fontEnv := "", []string(nil)
+	if mobile && runtime.GOOS == "linux" {
+		dir, err := os.MkdirTemp("", "prbg-fonts-")
+		if err != nil {
+			if tempDir != "" {
+				os.RemoveAll(tempDir)
+			}
+			return nil, fmt.Errorf("android fonts: %w", err)
+		}
+		conf, missing, err := writeAndroidFontConfig(dir, androidFontRoots)
+		if err != nil {
+			os.RemoveAll(dir)
+			if tempDir != "" {
+				os.RemoveAll(tempDir)
+			}
+			return nil, fmt.Errorf("android fonts: %w", err)
+		}
+		if len(missing) > 0 {
+			androidFontsWarning.Do(func() {
+				fmt.Printf("Warning: android fonts missing (%s): install fonts-roboto fonts-noto-core fonts-noto-cjk fonts-noto-color-emoji fonts-noto-mono\n", strings.Join(missing, ", "))
+			})
+		}
+		fontDir, fontEnv = dir, append(os.Environ(), "FONTCONFIG_FILE="+conf)
+	}
+
 	// Create Chrome command
 	cmd := exec.CommandContext(ctx, chromePath, flags...)
+	cmd.Env = fontEnv // nil 时继承当前环境
 	// 进程组与 ctx 取消时的退出方式因平台而异，见 process_*.go
 	configureChromeCmd(cmd)
 	// ctx 取消和 Kill 共用同一次正常退出请求，见 sigtermOnce
@@ -118,6 +146,9 @@ func (cl *ChromeLauncher) Launch(ctx context.Context, opts *ConnectOptions) (*Ch
 		if tempDir != "" {
 			os.RemoveAll(tempDir)
 		}
+		if fontDir != "" {
+			os.RemoveAll(fontDir)
+		}
 		return nil, fmt.Errorf("failed to start Chrome: %w", err)
 	}
 
@@ -127,6 +158,7 @@ func (cl *ChromeLauncher) Launch(ctx context.Context, opts *ConnectOptions) (*Ch
 		PID:             cmd.Process.Pid,
 		Flags:           flags,
 		tempUserDataDir: tempDir,
+		fontConfigDir:   fontDir,
 		exited:          make(chan struct{}),
 		sigterm:         term,
 	}
@@ -345,7 +377,7 @@ func (cp *ChromeProcess) Kill() error {
 		return nil
 	}
 	// 进程退出后删除临时 profile（尽力而为，删除失败不影响关闭结果）
-	if cp.tempUserDataDir != "" {
+	if cp.tempUserDataDir != "" || cp.fontConfigDir != "" {
 		defer cp.removeTempUserDataDir()
 	}
 
@@ -370,12 +402,17 @@ func (cp *ChromeProcess) Kill() error {
 	}
 }
 
-// removeTempUserDataDir 删除本库创建的临时 profile。
+// removeTempUserDataDir 删除本库创建的临时 profile 与手机身份的字体配置目录。
 // 主进程退出后 network service 等辅助进程可能仍在落盘，会把删掉的文件重新写回，
 // 所以先等它们退出（最多 3s，超时强杀）再删除。
 func (cp *ChromeProcess) removeTempUserDataDir() {
 	cp.waitProcessTreeExit(3 * time.Second)
-	os.RemoveAll(cp.tempUserDataDir)
+	if cp.tempUserDataDir != "" {
+		os.RemoveAll(cp.tempUserDataDir)
+	}
+	if cp.fontConfigDir != "" {
+		os.RemoveAll(cp.fontConfigDir)
+	}
 }
 
 // IsRunning checks if the Chrome process is still running
@@ -519,3 +556,6 @@ func (s *sigtermOnce) terminate(p *os.Process) error {
 	s.once.Do(func() { s.err = terminateProcess(p) })
 	return s.err
 }
+
+// androidFontsWarning 缺安卓字体只警告一次
+var androidFontsWarning sync.Once

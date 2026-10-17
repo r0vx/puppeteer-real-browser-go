@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -330,5 +331,29 @@ func TestAndroidWebGL(t *testing.T) {
 	  return [s3tc === null, float === null, aniso !== null, gl.getError() !== 0].join(); })()`
 	if v, _ := p.Evaluate(probe); v != "true,true,true,true" {
 		t.Errorf("extension probe = %v, want true,true,true,true", v)
+	}
+}
+
+// TestAndroidFonts Linux 上手机身份能按名字认出的字体与真机一致（只有安卓别名）；桌面身份仍用系统字体
+func TestAndroidFonts(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("字体只在 Linux 上由本库控制（macOS 由 CoreText 管理）")
+	}
+	srv, _ := baselineServer(t, "", http.StatusOK)
+	got := collectOn(t, connectAndroid(t, "android-fonts", "PGKM10").Page(), srv)["fonts"].(map[string]any)
+	want := loadAndroidBaseline(t)["fonts"].(map[string]any)
+	for name, v := range want {
+		if got[name] != v {
+			t.Errorf("font %q detected = %v, want %v", name, got[name], v)
+		}
+	}
+	inst, err := Connect(t.Context(), &ConnectOptions{Headless: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer inst.Close()
+	desktop := collectOn(t, inst.Page(), srv)["fonts"].(map[string]any)
+	if desktop["Noto Sans CJK SC"] != true {
+		t.Error("desktop identity lost the system fonts")
 	}
 }

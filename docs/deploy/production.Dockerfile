@@ -6,8 +6,9 @@ COPY . .
 RUN go build -o /out/app ./cmd/yourapp
 
 FROM debian:bookworm-slim
+# 安卓（手机）身份的字体：开源许可，按进程单独配置，桌面身份看不到（55-windows-fonts-only.conf 已屏蔽）
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates wget tini fontconfig \
+ && apt-get install -y --no-install-recommends ca-certificates wget tini fontconfig fonts-roboto fonts-noto-core fonts-noto-cjk fonts-noto-color-emoji fonts-noto-mono \
  && wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
  && apt-get install -y --no-install-recommends /tmp/chrome.deb \
  && rm -rf /var/lib/apt/lists/* /tmp/chrome.deb

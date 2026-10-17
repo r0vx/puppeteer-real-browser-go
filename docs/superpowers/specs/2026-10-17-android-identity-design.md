@@ -179,7 +179,7 @@ GPU 统一用 Mali-G610 MC6（实现者决定）。
   - 别名：Arial、Helvetica、Tahoma、Verdana 指向 sans-serif；Times、Times New Roman、Georgia 指向 serif；Courier、Courier New、Monaco 指向 monospace。
   - 只扫描上述字体所在的目录，其他字体对该进程不可见。
 - 字体来源：
-  - Debian 包 `fonts-roboto`、`fonts-noto-core`、`fonts-noto-cjk`、`fonts-noto-color-emoji`。全部为 Apache 或 OFL 许可，可以随镜像分发。
+  - Debian 包 `fonts-roboto`、`fonts-noto-core`、`fonts-noto-cjk`、`fonts-noto-color-emoji fonts-noto-mono`。全部为 Apache 或 OFL 许可，可以随镜像分发。
   - 生产镜像（`docs/deploy/production.Dockerfile`）与测试镜像（`test/linux-chrome.Dockerfile`）都安装这些包。
 - 只对 Linux 生效。macOS 开发机由 CoreText 管理字体，不受控制，字体相关测试只在 Linux 容器中跑。
 - 找不到 Roboto 时：启动不失败，但打印一次警告。缺字体时页面能看出来，但不该让浏览器起不来。

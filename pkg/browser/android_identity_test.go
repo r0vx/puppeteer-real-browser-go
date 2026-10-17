@@ -197,3 +197,35 @@ func TestAndroidHeadlessScreenFlags(t *testing.T) {
 		t.Errorf("flags %q, want %q", got, want)
 	}
 }
+
+// TestAndroidFontConfig 只链接各类安卓字体的文件，按类改族名，并配好通用族与安卓别名；缺的字体类会报出来
+func TestAndroidFontConfig(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"Roboto-Regular.ttf", "Roboto-Bold.ttf", "RobotoCondensed-Regular.ttf", "NotoSerif-Regular.ttf",
+		"NotoSerifDisplay-Regular.ttf", "NotoSansCJK-Regular.ttc", "NotoColorEmoji.ttf", "DejaVuSans.ttf"} {
+		os.WriteFile(filepath.Join(root, name), nil, 0o644)
+	}
+	dir := t.TempDir()
+	conf, missing, err := writeAndroidFontConfig(dir, []string{root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(missing, ",") != "android-mono" {
+		t.Errorf("missing = %v, want [android-mono]", missing)
+	}
+	entries, _ := os.ReadDir(filepath.Join(dir, "fonts"))
+	var linked []string
+	for _, e := range entries {
+		linked = append(linked, e.Name())
+	}
+	if want := "android-cjk--NotoSansCJK-Regular.ttc,android-emoji--NotoColorEmoji.ttf,android-sans--Roboto-Bold.ttf,android-sans--Roboto-Regular.ttf,android-serif--NotoSerif-Regular.ttf"; strings.Join(linked, ",") != want {
+		t.Errorf("linked %v", linked)
+	}
+	data, _ := os.ReadFile(conf)
+	for _, s := range []string{"<dir>" + filepath.Join(dir, "fonts") + "</dir>", `<string>/android-sans--</string>`,
+		`<family>Courier New</family>`, `<family>sans-serif</family>`, `binding="same"`} {
+		if !strings.Contains(string(data), s) {
+			t.Errorf("config lacks %s", s)
+		}
+	}
+}
