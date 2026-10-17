@@ -24,6 +24,9 @@
 手机身份的 Chrome 进程由本库单独配置字体（`FONTCONFIG_FILE`），只看得到安卓的字体：sans-serif 为 Roboto，serif 为 Noto Serif，monospace 为 Noto Mono，中文为 Noto Sans CJK，表情为 Noto Color Emoji。Arial、Helvetica、Times New Roman、Courier New 等安卓别名指向它们。镜像里装 `fonts-roboto fonts-noto-core fonts-noto-cjk fonts-noto-color-emoji fonts-noto-mono`（开源许可，可以随镜像分发）。缺字体时启动不失败，但会打印一次警告。
 检查：`docker run --rm <镜像> ls /usr/share/fonts/truetype/roboto` 应有 Roboto 字体文件。
 
+### iOS 身份的字体
+iOS 身份的进程只看得到 `/usr/share/fonts/apple`（或 `/usr/local/share/fonts/apple`）里的字体，字体保持原名（iPhone 上苹方、Helvetica 等都能按名探测到）；sans-serif 为 Helvetica，serif 为 Times New Roman，monospace 为 Courier New，中文回落到苹方，表情为 Apple Color Emoji。**本库不提供、也不会下载 Apple 字体**：它们的授权只限 Apple 硬件（见下面 Mac 账号一段），只有确有合规授权时才放进去（`production.Dockerfile` 里有注释掉的 `COPY fonts/apple/` 一行）。目录不存在或为空时启动不失败，打印一次警告并回落到安卓字体——中文正常显示，但字体探测看得出不是 iPhone（残余风险）。桌面身份看不到这个目录（`55-windows-fonts-only.conf` 已屏蔽）。
+
 Mac 账号：苹方、SF 等 Apple 字体的授权只限 Apple 硬件，无法在 Linux 上合规安装，Mac 身份在字体探测上弱于 Windows 身份。在 Mac 开发机上跑 Windows 账号时，字体探测会看到 Mac 字体，属于开发环境的差异，不代表生产环境。
 
 ## 代理与地区

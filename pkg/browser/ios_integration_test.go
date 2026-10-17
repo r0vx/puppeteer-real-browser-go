@@ -6,6 +6,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -324,5 +325,22 @@ func TestIOSSwipeScrolls(t *testing.T) {
 	}
 	if off, _ := p.Evaluate(`window.__touchOff`); off != 0.0 {
 		t.Errorf("Touch screenY - clientY = %v, want 0", off)
+	}
+}
+
+// TestIOSFonts Linux 上提供了 Apple 字体时，iOS 身份能按名字认出的字体与 iPhone 一致（Apple 字体受授权限制，由用户自备）
+func TestIOSFonts(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("字体只在 Linux 上由本库控制（macOS 由 CoreText 管理）")
+	}
+	if conf, _ := writeIOSFontConfig(t.TempDir(), iosFontRoots); conf == "" {
+		t.Skip("没有 Apple 字体（/usr/share/fonts/apple），iOS 身份回落到安卓字体")
+	}
+	srv, _ := baselineServer(t, "", http.StatusOK)
+	got := collectOn(t, connectIOS(t, "ios-fonts", "iphone-ios26").Page(), srv)["fonts"].(map[string]any)
+	for name, v := range loadIOSBaseline(t, "ios-safari-iphone-2.json")["fonts"].(map[string]any) {
+		if got[name] != v {
+			t.Errorf("font %q detected = %v, want %v", name, got[name], v)
+		}
 	}
 }

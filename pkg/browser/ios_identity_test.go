@@ -3,6 +3,7 @@ package browser
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -143,5 +144,30 @@ func TestIOSHeadlessScreenFlags(t *testing.T) {
 	got := strings.Join(headlessScreenFlags(configGeometry(cfg)), " ")
 	if want := "--screen-info={0,0 1260x2736 workAreaTop=0 workAreaBottom=0} --force-device-scale-factor=3"; got != want {
 		t.Errorf("flags %q, want %q", got, want)
+	}
+}
+
+// TestIOSFontConfig 只包含存在且非空的 Apple 字体目录，字体保持原名（iPhone 上能按名探测到），通用族按 Safari；没有字体时返回空
+func TestIOSFontConfig(t *testing.T) {
+	root, empty := t.TempDir(), t.TempDir()
+	os.WriteFile(filepath.Join(root, "PingFang.ttc"), nil, 0o644)
+	dir := t.TempDir()
+	conf, err := writeIOSFontConfig(dir, []string{root, empty, filepath.Join(root, "missing")})
+	if err != nil || conf == "" {
+		t.Fatalf("conf %q, err %v", conf, err)
+	}
+	data, _ := os.ReadFile(conf)
+	s := string(data)
+	for _, want := range []string{"<dir>" + root + "</dir>", "<cachedir>" + filepath.Join(dir, "cache") + "</cachedir>",
+		`<alias binding="same"><family>sans-serif</family><prefer><family>Helvetica</family><family>PingFang SC</family><family>Apple Color Emoji</family></prefer></alias>`} {
+		if !strings.Contains(s, want) {
+			t.Errorf("config lacks %s:\n%s", want, s)
+		}
+	}
+	if strings.Contains(s, "<dir>"+empty+"</dir>") || strings.Contains(s, "missing") {
+		t.Errorf("config lists an empty or missing directory:\n%s", s)
+	}
+	if conf, err := writeIOSFontConfig(t.TempDir(), []string{empty}); conf != "" || err != nil {
+		t.Errorf("no Apple fonts: conf %q, err %v; want none", conf, err)
 	}
 }

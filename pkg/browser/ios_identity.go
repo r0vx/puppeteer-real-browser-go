@@ -2,6 +2,8 @@ package browser
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -181,4 +183,51 @@ func appleGPU(maxSamples int) gpuProfile {
 			},
 		},
 	}
+}
+
+// iosFontRoots 用户自备的 Apple 字体所在目录（受授权限制，不随库分发，见 docs/deploy/README.md）
+var iosFontRoots = []string{"/usr/share/fonts/apple", "/usr/local/share/fonts/apple"}
+
+// iosFontAliases iPhone Safari 的通用族：西文为 Helvetica / Times New Roman / Courier New，中文回落到苹方，表情为 Apple Color Emoji
+var iosFontAliases = []struct {
+	Family string
+	Prefer []string
+}{
+	{"sans-serif", []string{"Helvetica", "PingFang SC"}},
+	{"serif", []string{"Times New Roman", "PingFang SC"}},
+	{"monospace", []string{"Courier New", "PingFang SC"}},
+}
+
+// writeIOSFontConfig 在 dir 下生成 iOS 身份的 fontconfig 配置：只包含 roots 里存在且非空的 Apple 字体目录，字体保持原名
+// （iPhone 上 PingFang SC、Helvetica 等都能按名探测到），再配通用族；不包含系统配置。没有任何 Apple 字体时返回空路径
+func writeIOSFontConfig(dir string, roots []string) (string, error) {
+	var b strings.Builder
+	b.WriteString("<?xml version=\"1.0\"?>\n<!DOCTYPE fontconfig SYSTEM \"urn:fontconfig:fonts.dtd\">\n<fontconfig>\n")
+	found := false
+	for _, r := range roots {
+		if entries, err := os.ReadDir(r); err == nil && len(entries) > 0 {
+			fmt.Fprintf(&b, "  <dir>%s</dir>\n", r)
+			found = true
+		}
+	}
+	if !found {
+		return "", nil
+	}
+	fmt.Fprintf(&b, "  <cachedir>%s</cachedir>\n", filepath.Join(dir, "cache"))
+	for _, a := range iosFontAliases {
+		fmt.Fprintf(&b, "  <alias binding=\"same\"><family>%s</family><prefer>", a.Family)
+		for _, f := range a.Prefer {
+			fmt.Fprintf(&b, "<family>%s</family>", f)
+		}
+		b.WriteString("<family>Apple Color Emoji</family></prefer></alias>\n")
+	}
+	b.WriteString("</fontconfig>\n")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("create %s: %w", dir, err)
+	}
+	conf := filepath.Join(dir, "fonts.conf")
+	if err := os.WriteFile(conf, []byte(b.String()), 0o644); err != nil {
+		return "", fmt.Errorf("write %s: %w", conf, err)
+	}
+	return conf, nil
 }

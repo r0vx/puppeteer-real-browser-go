@@ -114,7 +114,8 @@ func (cl *ChromeLauncher) Launch(ctx context.Context, opts *ConnectOptions) (*Ch
 	//	fmt.Printf("  [%d] %s\n", i, flag)
 	// }
 
-	// 手机身份（Linux）：进程级字体配置，只看得到安卓字体；桌面身份仍用系统配置
+	// 手机身份（Linux）：进程级字体配置。iOS 只看得到用户自备的 Apple 字体，没有时警告并回落到安卓字体；
+	// 安卓只看得到安卓字体；桌面身份仍用系统配置
 	fontDir, fontEnv := "", []string(nil)
 	if mobile && runtime.GOOS == "linux" {
 		dir, err := os.MkdirTemp("", "prbg-fonts-")
@@ -122,20 +123,30 @@ func (cl *ChromeLauncher) Launch(ctx context.Context, opts *ConnectOptions) (*Ch
 			if tempDir != "" {
 				os.RemoveAll(tempDir)
 			}
-			return nil, fmt.Errorf("android fonts: %w", err)
+			return nil, fmt.Errorf("mobile fonts: %w", err)
 		}
-		conf, missing, err := writeAndroidFontConfig(dir, androidFontRoots)
+		conf := ""
+		if osf == OSIOS {
+			if conf, err = writeIOSFontConfig(dir, iosFontRoots); err == nil && conf == "" {
+				iosFontsWarning.Do(func() {
+					fmt.Printf("Warning: no Apple fonts in %s: iOS identities fall back to Android fonts (font probing will not look like an iPhone)\n", strings.Join(iosFontRoots, ", "))
+				})
+			}
+		}
+		if err == nil && conf == "" {
+			var missing []string
+			if conf, missing, err = writeAndroidFontConfig(dir, androidFontRoots); err == nil && len(missing) > 0 {
+				androidFontsWarning.Do(func() {
+					fmt.Printf("Warning: android fonts missing (%s): install fonts-roboto fonts-noto-core fonts-noto-cjk fonts-noto-color-emoji fonts-noto-mono\n", strings.Join(missing, ", "))
+				})
+			}
+		}
 		if err != nil {
 			os.RemoveAll(dir)
 			if tempDir != "" {
 				os.RemoveAll(tempDir)
 			}
-			return nil, fmt.Errorf("android fonts: %w", err)
-		}
-		if len(missing) > 0 {
-			androidFontsWarning.Do(func() {
-				fmt.Printf("Warning: android fonts missing (%s): install fonts-roboto fonts-noto-core fonts-noto-cjk fonts-noto-color-emoji fonts-noto-mono\n", strings.Join(missing, ", "))
-			})
+			return nil, fmt.Errorf("mobile fonts: %w", err)
 		}
 		fontDir, fontEnv = dir, append(os.Environ(), "FONTCONFIG_FILE="+conf)
 	}
@@ -572,3 +583,6 @@ func (s *sigtermOnce) terminate(p *os.Process) error {
 
 // androidFontsWarning 缺安卓字体只警告一次
 var androidFontsWarning sync.Once
+
+// iosFontsWarning 没有 Apple 字体只警告一次
+var iosFontsWarning sync.Once
