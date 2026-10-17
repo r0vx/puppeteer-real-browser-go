@@ -128,7 +128,8 @@ func TestMobileTypeSpaceAndEnter(t *testing.T) {
 	}
 }
 
-// TestMobileScrollSplits 长距离滚动拆成多次拖动（每次不超过视口的 60%），手指与滚动方向相反，总拖动距离等于请求值
+// TestMobileScrollSplits 长距离滚动拆成等长的几次拖动（每次不超过视口的 60%），手指与滚动方向相反；
+// 每次多拖一个触摸阈值（浏览器在手指移过阈值之后才开始滚动），所以总拖动距离为请求值加上每次的阈值
 func TestMobileScrollSplits(t *testing.T) {
 	send, log := recordCDP()
 	if err := mobileScroll(send, 400, 800, 0, 1000); err != nil {
@@ -146,14 +147,14 @@ func TestMobileScrollSplits(t *testing.T) {
 			lastY = touchPointOf(c)["y"].(float64)
 		case "touchEnd":
 			drag := startY - lastY
-			if drag <= 0 || drag > 480+0.1 {
-				t.Errorf("swipe dragged %v px (finger must move up, at most 60%% of the viewport)", drag)
+			if drag <= touchSlop || drag > 480+touchSlop+0.1 {
+				t.Errorf("swipe dragged %v px (finger must move up, past the slop, at most 60%% of the viewport plus the slop)", drag)
 			}
 			total += drag
 		}
 	}
-	if starts != 3 || math.Abs(total-1000) > 0.5 {
-		t.Errorf("%d swipes dragging %v px in total, want 3 swipes and 1000 px", starts, total)
+	if starts != 3 || math.Abs(total-(1000+3*touchSlop)) > 0.5 {
+		t.Errorf("%d swipes dragging %v px in total, want 3 equal swipes and %v px", starts, total, 1000+3*touchSlop)
 	}
 }
 

@@ -92,22 +92,29 @@ func mobileSwipe(send cdpSend, x0, y0, x1, y1 float64) error {
 	return send("Input.dispatchTouchEvent", touchEvent("touchEnd", x1, y1, 0))
 }
 
-// mobileScroll 用手指拖动滚动 (deltaX, deltaY)：手指方向与滚动方向相反；
-// 一次拖动不超过视口的 60%，更长的距离分几次拖，中间停一下；最后等滚动停下
+// touchSlop 浏览器在手指移动超过这段距离（CSS 像素）之后才开始滚动，这段不计入滚动；
+// 短于它的拖动会被当成一次点按（实测 Chrome 移动模拟下每次拖动少滚约 14.3px）
+const touchSlop = 15.0
+
+// mobileScroll 用手指拖动滚动 (deltaX, deltaY)：手指方向与滚动方向相反；拆成等长的几次拖动，
+// 每次不超过视口的 60%，中间停一下。每次多拖一个 touchSlop：滚动距离接近请求值，最短的拖动也不会变成点按
 func mobileScroll(send cdpSend, viewportW, viewportH int, deltaX, deltaY float64) error {
-	maxX, maxY := float64(viewportW)*0.6, float64(viewportH)*0.6
-	clamp := func(v, limit float64) float64 { return math.Max(-limit, math.Min(limit, v)) }
-	for i := 0; math.Abs(deltaX) >= 1 || math.Abs(deltaY) >= 1; i++ {
+	if math.Abs(deltaX) < 1 && math.Abs(deltaY) < 1 {
+		return nil
+	}
+	n := int(math.Ceil(math.Max(math.Abs(deltaX)/(float64(viewportW)*0.6), math.Abs(deltaY)/(float64(viewportH)*0.6))))
+	dx, dy := deltaX/float64(n), deltaY/float64(n)
+	dist := math.Hypot(dx, dy)
+	ex, ey := dx+dx/dist*touchSlop, dy+dy/dist*touchSlop // 沿拖动方向补上阈值
+	for i := 0; i < n; i++ {
 		if i > 0 {
 			time.Sleep(between(120, 250))
 		}
-		dx, dy := clamp(deltaX, maxX), clamp(deltaY, maxY)
 		cx := float64(viewportW)/2 + (rand.Float64()-0.5)*float64(viewportW)*0.2
 		cy := float64(viewportH)/2 + (rand.Float64()-0.5)*float64(viewportH)*0.1
-		if err := mobileSwipe(send, cx+dx/2, cy+dy/2, cx-dx/2, cy-dy/2); err != nil {
+		if err := mobileSwipe(send, cx+ex/2, cy+ey/2, cx-ex/2, cy-ey/2); err != nil {
 			return err
 		}
-		deltaX, deltaY = deltaX-dx, deltaY-dy
 	}
 	time.Sleep(300 * time.Millisecond)
 	return nil

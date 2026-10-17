@@ -161,6 +161,8 @@ const swipePage = `<!doctype html><meta name="viewport" content="width=device-wi
 <div style="height: 4000px; background: linear-gradient(#eef, #fee)"></div>
 <script>
 window.__t = [];
+window.__clicks = 0;
+addEventListener('click', () => window.__clicks++, true);
 for (const type of ['touchstart', 'touchmove', 'touchend', 'pointercancel'])
   addEventListener(type, e => window.__t.push({type: e.type, cancelable: e.cancelable, t: performance.now()}), {passive: true});
 </script>`
@@ -178,8 +180,8 @@ func TestAndroidSwipeScrolls(t *testing.T) {
 		t.Fatal(err)
 	}
 	time.Sleep(500 * time.Millisecond)
-	if y, _ := p.Evaluate(`scrollY`); y.(float64) < 900*0.7 || y.(float64) > 900*1.3 {
-		t.Errorf("scrollY = %v after RealScroll(0, 900)", y)
+	if y, _ := p.Evaluate(`scrollY`); y.(float64) < 900-30 || y.(float64) > 900+30 {
+		t.Errorf("scrollY = %v after RealScroll(0, 900), want 900 ± 30", y)
 	}
 	raw, _ := p.Evaluate(`JSON.stringify(window.__t)`)
 	var events []map[string]any
@@ -295,5 +297,22 @@ func TestAndroidControlChars(t *testing.T) {
 	}
 	if err := sp.RealSendKeys("x\ty"); err == nil {
 		t.Error("tab was typed instead of rejected")
+	}
+}
+
+// TestAndroidShortSwipeIsNotATap 很短的滚动也是拖动：不会变成一次点按点中手指下的元素，滚动距离接近请求值（Review Focus 3）
+func TestAndroidShortSwipeIsNotATap(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, swipePage) }))
+	defer srv.Close()
+	p := connectAndroid(t, "android-short-swipe", "PGKM10").Page()
+	if err := p.Navigate(srv.URL); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.(*CustomCDPPage).RealScroll(0, 8); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(300 * time.Millisecond)
+	if v, _ := p.Evaluate(`[window.__clicks, Math.round(scrollY)].join()`); v != "0,8" && v != "0,9" && v != "0,7" {
+		t.Errorf("clicks, scrollY = %v after RealScroll(0, 8), want no click and about 8 px", v)
 	}
 }
