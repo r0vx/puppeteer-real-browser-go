@@ -301,7 +301,7 @@ opts := &browser.ConnectOptions{
 ### 手机身份（安卓，2026-10）
 - `ConnectOptions{Mobile: true, FingerprintUserID: "…"}` 为新账号生成安卓 Chrome 身份：UA、Client Hints（含机型）、移动视口与触屏、WebGL（Mali-G610 MC6 真机实测）、内存、电量、通知 / 通讯录 / 网络类型等接口，主页面、跨站 iframe、Worker、弹窗一致。
 - 只对新账号起作用。已有指纹的系统永不改变，与已有指纹的类型不一致时 `Connect` 报错。手机身份需要设 `FingerprintUserID`，只支持默认通道（不能与 `UseChromedp` 同用）。
-- 机型从 6 款天玑 8100 / 8200 手机中按账号固定抽取：1 款真机实测，其余为整理值。Linux 上字体由本库按进程配置，需要安装 `fonts-roboto fonts-noto-core fonts-noto-cjk fonts-noto-color-emoji`。
+- 机型从 6 款天玑 8100 / 8200 手机中按账号固定抽取：1 款真机实测，其余为整理值。Linux 上字体由本库按进程配置，需要安装 `fonts-roboto fonts-noto-core fonts-noto-cjk fonts-noto-color-emoji fonts-noto-mono`。
 - 已知限制：
   - 在手机身份上调用 `Click` / `RealSendKeys` 仍是鼠标和桌面键盘事件（子项目 M2 改为触摸与输入法）；
   - WebGL 实际计算精度仍是 32 位浮点；HEVC（H.265）视频解码不报支持（宿主没有硬件解码）；
