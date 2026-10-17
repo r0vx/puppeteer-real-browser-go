@@ -194,12 +194,14 @@ func applyIdentity(call cdpCaller, id *Identity, kind targetKind) error {
 }
 
 // viewportOverride 改视口用的 Emulation.setDeviceMetricsOverride 参数：带上身份的屏幕尺寸与 DPR，
-// 否则覆盖会把屏幕退回无界面默认值；身份不调整几何时不覆盖 DPR；手机身份保持移动端模拟与竖屏
+// 否则覆盖会把屏幕退回无界面默认值；身份不调整几何时不覆盖 DPR；手机身份保持移动端模拟与竖屏，
+// 且视口不超过屏幕宽与手机默认视口高（调用方按桌面习惯传 1920×1080 时不会出现比屏幕还宽的视口）
 func viewportOverride(id *Identity, width, height int) map[string]any {
 	p := map[string]any{"width": width, "height": height, "deviceScaleFactor": 0, "mobile": false}
 	if id != nil && id.Screen.Width > 0 {
 		p["deviceScaleFactor"], p["screenWidth"], p["screenHeight"] = id.Screen.DPR, id.Screen.Width, id.Screen.Height
-		if id.Screen.Mobile {
+		if s := id.Screen; s.Mobile {
+			p["width"], p["height"] = min(width, s.Width), min(height, s.InnerHeight)
 			p["mobile"], p["screenOrientation"] = true, portraitOrientation
 		}
 	}

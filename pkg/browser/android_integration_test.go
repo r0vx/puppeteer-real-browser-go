@@ -427,3 +427,20 @@ func TestAndroidMatchesBaseline(t *testing.T) {
 		t.Error(d)
 	}
 }
+
+// TestAndroidSetViewportClamps 手机的视口不会比屏幕大：调用方按桌面习惯传 1920×1080（triumph 默认如此）时，
+// 宽度限制为屏幕宽、高度限制为手机默认视口高，不出现 innerWidth 1920、screen.width 411 的矛盾
+func TestAndroidSetViewportClamps(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, mobilePage) }))
+	defer srv.Close()
+	p := connectAndroid(t, "android-clamp", "22041211AC").Page()
+	if err := p.SetViewport(1920, 1080); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Navigate(srv.URL); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := p.Evaluate(`[innerWidth, innerHeight, outerWidth, outerHeight, screen.width, screen.height].join()`); got != "411,810,411,810,411,914" {
+		t.Errorf("viewport after SetViewport(1920, 1080) = %v, want 411,810,411,810,411,914", got)
+	}
+}
