@@ -380,7 +380,10 @@ if (C.android) {
   for (const k of ['hid', 'windowControlsOverlay']) delete Navigator.prototype[k];
   for (const k of ['EyeDropper', 'SharedWorker', 'documentPictureInPicture', 'queryLocalFonts', 'HID', 'HIDDevice', 'HIDConnectionEvent',
     'HIDInputReportEvent', 'WindowControlsOverlay', 'WindowControlsOverlayGeometryChangeEvent', 'DocumentPictureInPicture',
-    'DocumentPictureInPictureEvent', 'FontData']) delete G[k];
+    'DocumentPictureInPictureEvent', 'FontData', 'getScreenDetails', 'ScreenDetails', 'ScreenDetailed', 'CaptureController', 'CropTarget',
+    'RestrictionTarget']) delete G[k];
+  // 屏幕录制（getDisplayMedia）与采集句柄只有桌面 Chrome 有
+  if (G.MediaDevices) for (const k of ['getDisplayMedia', 'setCaptureHandleConfig']) delete MediaDevices.prototype[k];
   if (G.chrome) delete G.chrome.app;
   // Notification：安卓只能经 ServiceWorkerRegistration.showNotification 发通知，new 时抛错；静态成员与原型保持原生
   if (G.Notification) {

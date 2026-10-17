@@ -200,7 +200,9 @@ const androidAPIsJS = `(async () => {
     hasContacts: 'contacts' in navigator, connType: navigator.connection.type,
     connKeys: Object.getOwnPropertyNames(NetworkInformation.prototype).join(), downlinkMax: String(navigator.connection.downlinkMax),
     removed: ['hid', 'windowControlsOverlay'].filter(k => k in navigator)
-      .concat(['EyeDropper', 'SharedWorker', 'documentPictureInPicture', 'queryLocalFonts', 'HID', 'FontData'].filter(k => k in window)),
+      .concat(['EyeDropper', 'SharedWorker', 'documentPictureInPicture', 'queryLocalFonts', 'HID', 'FontData',
+        'getScreenDetails', 'ScreenDetails', 'ScreenDetailed', 'CaptureController', 'CropTarget', 'RestrictionTarget'].filter(k => k in window))
+      .concat(['getDisplayMedia', 'setCaptureHandleConfig'].filter(k => window.MediaDevices && k in MediaDevices.prototype)),
     chromeApp: 'app' in window.chrome, battery: [b.charging, b.chargingTime, b.dischargingTime, b.level],
     share: [typeof navigator.share, typeof navigator.canShare], barcode: typeof BarcodeDetector,
   };
