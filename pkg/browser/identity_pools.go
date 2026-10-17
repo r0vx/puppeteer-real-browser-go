@@ -81,6 +81,7 @@ type gpuProfile struct {
 	Vendor   string // UNMASKED_VENDOR_WEBGL
 	Renderer string // UNMASKED_RENDERER_WEBGL
 	Caps     *webglCaps
+	Mobile   *mobileWebGL // 手机 GPU 的完整 WebGL 表面（安卓身份）；桌面为 nil
 }
 
 // d3d11Caps Windows 上 ANGLE D3D11 后端对各厂商显卡统一暴露的能力参数
@@ -103,21 +104,21 @@ var appleCaps = &webglCaps{
 
 // windowsGPUs Windows 常见显卡（renderer 串含 PCI 设备 ID，与真实 Chrome 格式一致）
 var windowsGPUs = []weighted[gpuProfile]{
-	{gpuProfile{"Google Inc. (Intel)", "ANGLE (Intel, Intel(R) UHD Graphics 620 (0x00005917) Direct3D11 vs_5_0 ps_5_0, D3D11)", d3d11Caps}, 20},
-	{gpuProfile{"Google Inc. (Intel)", "ANGLE (Intel, Intel(R) UHD Graphics 630 (0x00003E92) Direct3D11 vs_5_0 ps_5_0, D3D11)", d3d11Caps}, 15},
-	{gpuProfile{"Google Inc. (Intel)", "ANGLE (Intel, Intel(R) Iris(R) Xe Graphics (0x00009A49) Direct3D11 vs_5_0 ps_5_0, D3D11)", d3d11Caps}, 20},
-	{gpuProfile{"Google Inc. (NVIDIA)", "ANGLE (NVIDIA, NVIDIA GeForce GTX 1650 (0x00001F82) Direct3D11 vs_5_0 ps_5_0, D3D11)", d3d11Caps}, 12},
-	{gpuProfile{"Google Inc. (NVIDIA)", "ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 (0x00002503) Direct3D11 vs_5_0 ps_5_0, D3D11)", d3d11Caps}, 13},
-	{gpuProfile{"Google Inc. (AMD)", "ANGLE (AMD, AMD Radeon(TM) Graphics (0x00001638) Direct3D11 vs_5_0 ps_5_0, D3D11)", d3d11Caps}, 20},
+	{gpuProfile{"Google Inc. (Intel)", "ANGLE (Intel, Intel(R) UHD Graphics 620 (0x00005917) Direct3D11 vs_5_0 ps_5_0, D3D11)", d3d11Caps, nil}, 20},
+	{gpuProfile{"Google Inc. (Intel)", "ANGLE (Intel, Intel(R) UHD Graphics 630 (0x00003E92) Direct3D11 vs_5_0 ps_5_0, D3D11)", d3d11Caps, nil}, 15},
+	{gpuProfile{"Google Inc. (Intel)", "ANGLE (Intel, Intel(R) Iris(R) Xe Graphics (0x00009A49) Direct3D11 vs_5_0 ps_5_0, D3D11)", d3d11Caps, nil}, 20},
+	{gpuProfile{"Google Inc. (NVIDIA)", "ANGLE (NVIDIA, NVIDIA GeForce GTX 1650 (0x00001F82) Direct3D11 vs_5_0 ps_5_0, D3D11)", d3d11Caps, nil}, 12},
+	{gpuProfile{"Google Inc. (NVIDIA)", "ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 (0x00002503) Direct3D11 vs_5_0 ps_5_0, D3D11)", d3d11Caps, nil}, 13},
+	{gpuProfile{"Google Inc. (AMD)", "ANGLE (AMD, AMD Radeon(TM) Graphics (0x00001638) Direct3D11 vs_5_0 ps_5_0, D3D11)", d3d11Caps, nil}, 20},
 }
 
 // macGPUs Apple 芯片 Mac
 var macGPUs = []weighted[gpuProfile]{
-	{gpuProfile{"Google Inc. (Apple)", "ANGLE (Apple, ANGLE Metal Renderer: Apple M1, Unspecified Version)", appleCaps}, 30},
-	{gpuProfile{"Google Inc. (Apple)", "ANGLE (Apple, ANGLE Metal Renderer: Apple M2, Unspecified Version)", appleCaps}, 30},
-	{gpuProfile{"Google Inc. (Apple)", "ANGLE (Apple, ANGLE Metal Renderer: Apple M3, Unspecified Version)", appleCaps}, 20},
-	{gpuProfile{"Google Inc. (Apple)", "ANGLE (Apple, ANGLE Metal Renderer: Apple M1 Pro, Unspecified Version)", appleCaps}, 10},
-	{gpuProfile{"Google Inc. (Apple)", "ANGLE (Apple, ANGLE Metal Renderer: Apple M2 Pro, Unspecified Version)", appleCaps}, 10},
+	{gpuProfile{"Google Inc. (Apple)", "ANGLE (Apple, ANGLE Metal Renderer: Apple M1, Unspecified Version)", appleCaps, nil}, 30},
+	{gpuProfile{"Google Inc. (Apple)", "ANGLE (Apple, ANGLE Metal Renderer: Apple M2, Unspecified Version)", appleCaps, nil}, 30},
+	{gpuProfile{"Google Inc. (Apple)", "ANGLE (Apple, ANGLE Metal Renderer: Apple M3, Unspecified Version)", appleCaps, nil}, 20},
+	{gpuProfile{"Google Inc. (Apple)", "ANGLE (Apple, ANGLE Metal Renderer: Apple M1 Pro, Unspecified Version)", appleCaps, nil}, 10},
+	{gpuProfile{"Google Inc. (Apple)", "ANGLE (Apple, ANGLE Metal Renderer: Apple M2 Pro, Unspecified Version)", appleCaps, nil}, 10},
 }
 
 // linuxHostGPU 不设指纹的默认路径在 Linux 服务器上遮挡 SwiftShader 用的标识（只改标识，不改能力参数）

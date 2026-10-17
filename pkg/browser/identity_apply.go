@@ -245,7 +245,19 @@ func fingerprintForOptions(opts *ConnectOptions) (*FingerprintConfig, error) {
 	if err != nil {
 		return nil, fmt.Errorf("fingerprint manager: %w", err)
 	}
-	return manager.GetOrCreateUserFingerprint(opts.FingerprintUserID, GetInitParamsFromOptions(opts))
+	cfg, err := manager.GetOrCreateUserFingerprint(opts.FingerprintUserID, GetInitParamsFromOptions(opts))
+	if err != nil {
+		return nil, err
+	}
+	// 同一账号 ID 只能是一种设备：用错类型时报错，不改文件（避免账号的设备在电脑和手机之间跳变）
+	if mobile := cfg.Device != nil; mobile != opts.Mobile {
+		kind := "desktop"
+		if mobile {
+			kind = "mobile"
+		}
+		return nil, fmt.Errorf("fingerprint %s is a %s identity but ConnectOptions.Mobile is %v", opts.FingerprintUserID, kind, opts.Mobile)
+	}
+	return cfg, nil
 }
 
 // browserHostInfo 返回 Chrome 进程的真实浏览器信息，同一进程只读一次：经浏览器级连接在启动时的标签页上读取。

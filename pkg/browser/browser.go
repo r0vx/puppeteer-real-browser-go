@@ -2,6 +2,7 @@ package browser
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/chromedp/chromedp"
@@ -24,6 +25,9 @@ func (rb *RealBrowser) Connect(ctx context.Context, opts *ConnectOptions) (*Brow
 			Headless:  false,
 			Turnstile: false,
 		}
+	}
+	if err := validateMobileOptions(opts); err != nil {
+		return nil, err
 	}
 
 	// Create context with cancellation
@@ -163,4 +167,18 @@ func (rb *RealBrowser) connectToChrome(ctx context.Context, chrome *ChromeProces
 func Connect(ctx context.Context, opts *ConnectOptions) (*BrowserInstance, error) {
 	browser := NewRealBrowser()
 	return browser.Connect(ctx, opts)
+}
+
+// validateMobileOptions 移动身份必须有账号指纹，且只支持默认的 CustomCDP 通道（chromedp 通道只给主页面下发身份）
+func validateMobileOptions(opts *ConnectOptions) error {
+	if !opts.Mobile {
+		return nil
+	}
+	if opts.FingerprintUserID == "" {
+		return errors.New("mobile identity needs FingerprintUserID")
+	}
+	if opts.UseChromedp {
+		return errors.New("mobile identity needs the default CustomCDP channel; unset UseChromedp")
+	}
+	return nil
 }

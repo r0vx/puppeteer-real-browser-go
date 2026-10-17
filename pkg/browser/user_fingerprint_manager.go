@@ -25,7 +25,7 @@ func GetInitParamsFromOptions(opts *ConnectOptions) *FingerprintInitParams {
 		return nil
 	}
 	// 只有指定了参数才返回
-	if opts.Width == 0 && opts.Height == 0 && opts.UserAgent == "" && opts.Language == "" && len(opts.Languages) == 0 && opts.Timezone == "" && opts.TimezoneOffset == 0 {
+	if opts.Width == 0 && opts.Height == 0 && opts.UserAgent == "" && opts.Language == "" && len(opts.Languages) == 0 && opts.Timezone == "" && opts.TimezoneOffset == 0 && !opts.Mobile {
 		return nil
 	}
 	return &FingerprintInitParams{
@@ -36,6 +36,7 @@ func GetInitParamsFromOptions(opts *ConnectOptions) *FingerprintInitParams {
 		Languages:      opts.Languages,
 		Timezone:       opts.Timezone,
 		TimezoneOffset: opts.TimezoneOffset,
+		Mobile:         opts.Mobile,
 	}
 }
 
@@ -62,6 +63,7 @@ type FingerprintInitParams struct {
 	Languages      []string // 语言列表，如 ["zh-CN", "zh", "en"]
 	Timezone       string   // 时区名称，如 "Asia/Shanghai"
 	TimezoneOffset int      // 时区偏移（分钟），如 480 表示 UTC+8，0 表示未设置
+	Mobile         bool     // 新账号生成移动身份（见 ConnectOptions.Mobile）
 }
 
 // GetUserFingerprint 获取用户指纹配置（无初始化参数）
@@ -110,9 +112,15 @@ func (ufm *UserFingerprintManager) GetOrCreateUserFingerprint(userID string, ini
 		return config, nil
 	}
 
-	// 新账号：系统由绑定的 UA 决定，未提供 UA 时为 Windows
+	// 新账号：要求移动身份时生成安卓（iOS 见子项目 M3），否则系统由绑定的 UA 决定，未提供 UA 时为 Windows
 	osFamily := OSWindows
-	if initParams != nil && initParams.UserAgent != "" {
+	switch {
+	case initParams != nil && initParams.Mobile:
+		if isIOSUserAgent(initParams.UserAgent) {
+			return nil, fmt.Errorf("fingerprint %s: iOS identities are not supported yet", userID)
+		}
+		osFamily = OSAndroid
+	case initParams != nil && initParams.UserAgent != "":
 		osFamily = osFromUserAgent(initParams.UserAgent)
 	}
 	config := generateFingerprintFor(userID, osFamily)

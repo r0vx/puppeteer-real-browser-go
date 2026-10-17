@@ -31,6 +31,11 @@ func osFromUserAgent(ua string) OSFamily {
 	return OSWindows
 }
 
+// isIOSUserAgent UA 是否为 iPhone / iPad
+func isIOSUserAgent(ua string) bool {
+	return strings.Contains(ua, "iPhone") || strings.Contains(ua, "iPad")
+}
+
 // platformFor 返回系统对应的 navigator.platform
 func platformFor(os OSFamily) string {
 	if os == OSMac {
@@ -133,8 +138,9 @@ func (h hostInfo) majorVersion() string {
 type screenGeometry struct {
 	Width, Height, AvailWidth, AvailHeight, AvailTop int
 	DPR                                              float64
-	OuterWidth, OuterHeight                          int // 浏览器窗口（最大化 = 可用区域）
-	InnerWidth, InnerHeight                          int // 视口 = 窗口减去浏览器 UI
+	OuterWidth, OuterHeight                          int  // 浏览器窗口（最大化 = 可用区域）
+	InnerWidth, InnerHeight                          int  // 视口 = 窗口减去浏览器 UI
+	Mobile                                           bool // 手机：视口按移动端模拟（mobile: true），不调整窗口外框
 }
 
 // geometryFor 由屏幕规格推算可用区域和最大化窗口：Windows 扣任务栏（Win10 40、Win11 48 CSS 像素，随缩放等比放大，

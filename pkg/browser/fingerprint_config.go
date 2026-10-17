@@ -19,6 +19,9 @@ type FingerprintConfig struct {
 	// SchemaVersion 文件格式版本，见 fingerprintSchemaVersion
 	SchemaVersion int `json:"schema_version,omitempty"`
 
+	// Device 移动身份的设备；只有移动指纹才有这一段，老指纹没有，因而永远是桌面身份
+	Device *DeviceConfig `json:"device,omitempty"`
+
 	// 屏幕相关
 	Screen ScreenConfig `json:"screen"`
 
@@ -60,6 +63,13 @@ type FingerprintConfig struct {
 
 	// HTTP2指纹
 	HTTP2Config HTTP2Config `json:"http2_config"`
+}
+
+// DeviceConfig 移动身份的设备
+type DeviceConfig struct {
+	Kind         string `json:"kind"`          // android（iOS 见子项目 M3）
+	Model        string `json:"model"`         // Client Hints 的 model，即机型代号
+	DeviceMemory int    `json:"device_memory"` // navigator.deviceMemory
 }
 
 // ScreenConfig 屏幕配置
@@ -606,25 +616,29 @@ func readFile(filepath string) ([]byte, error) {
 	return nil, nil
 }
 
-// fingerprintSchemaVersion 当前指纹格式：2 = 自洽的 Windows / macOS 身份（UA 只用于判定系统，版本运行时跟随真实浏览器）
+// fingerprintSchemaVersion 当前指纹格式：2 = 自洽的身份（Windows / macOS，或带 device 段的移动身份；UA 只用于判定系统，版本运行时跟随真实浏览器）
 const fingerprintSchemaVersion = 2
 
-// Normalize 把指纹规范化为自洽的 Windows / macOS 身份，返回是否有改动（调用方据此回写文件）。
+// Normalize 把指纹规范化为自洽的身份（Windows / macOS，或有 device 段时的安卓），返回是否有改动（调用方据此回写文件）。
 // 只修正身份相关字段，其余字段原样保留；对已规范化的配置幂等
 func (config *FingerprintConfig) Normalize() bool {
 	before, _ := json.Marshal(config)
-	osf := osFromUserAgent(config.Browser.UserAgent)
+	osf := configOS(config)
 	seed := func(purpose string) uint64 { return identitySeed(config.UserID, purpose) }
 
-	major := uaMajorVersion(config.Browser.UserAgent)
-	if major == "" {
-		major = "120"
-	}
-	config.Browser.UserAgent = canonicalUserAgent(osf, major)
-	config.Browser.Platform = platformFor(osf)
-	config.Browser.Vendor = "Google Inc."
-	if !containsValue(platformVersionsFor(osf), config.Browser.PlatformVersion) {
-		config.Browser.PlatformVersion = pickWeighted(platformVersionsFor(osf), seed("platform-version"))
+	if osf == OSAndroid {
+		normalizeAndroid(config, seed)
+	} else {
+		major := uaMajorVersion(config.Browser.UserAgent)
+		if major == "" {
+			major = "120"
+		}
+		config.Browser.UserAgent = canonicalUserAgent(osf, major)
+		config.Browser.Platform = platformFor(osf)
+		config.Browser.Vendor = "Google Inc."
+		if !containsValue(platformVersionsFor(osf), config.Browser.PlatformVersion) {
+			config.Browser.PlatformVersion = pickWeighted(platformVersionsFor(osf), seed("platform-version"))
+		}
 	}
 
 	// 语言：languages 首项必须等于 language
@@ -640,29 +654,31 @@ func (config *FingerprintConfig) Normalize() bool {
 		config.Timezone.Timezone, _ = getTimezoneForLanguage(config.Browser.Language)
 	}
 
-	// 屏幕：不像该系统的真实设备时按用户 ID 重选；可用区域按系统规则重算
-	if !plausibleScreen(osf, config.Screen) {
-		s := pickWeighted(screensFor(osf), seed("screen"))
-		config.Screen.Width, config.Screen.Height, config.Screen.DevicePixelRatio = s.Width, s.Height, s.DPR
-	}
-	spec, _ := screenSpecFor(osf, config.Screen.Width, config.Screen.Height, config.Screen.DevicePixelRatio)
-	g := geometryFor(osf, spec, config.Browser.PlatformVersion)
-	config.Screen.AvailWidth, config.Screen.AvailHeight = g.AvailWidth, g.AvailHeight
-	config.Screen.ColorDepth, config.Screen.PixelDepth = 24, 24
+	if osf != OSAndroid {
+		// 屏幕：不像该系统的真实设备时按用户 ID 重选；可用区域按系统规则重算
+		if !plausibleScreen(osf, config.Screen) {
+			s := pickWeighted(screensFor(osf), seed("screen"))
+			config.Screen.Width, config.Screen.Height, config.Screen.DevicePixelRatio = s.Width, s.Height, s.DPR
+		}
+		spec, _ := screenSpecFor(osf, config.Screen.Width, config.Screen.Height, config.Screen.DevicePixelRatio)
+		g := geometryFor(osf, spec, config.Browser.PlatformVersion)
+		config.Screen.AvailWidth, config.Screen.AvailHeight = g.AvailWidth, g.AvailHeight
+		config.Screen.ColorDepth, config.Screen.PixelDepth = 24, 24
 
-	if !containsValue(coresFor(osf), config.Browser.HardwareConcurrency) {
-		config.Browser.HardwareConcurrency = pickWeighted(coresFor(osf), seed("cores"))
-	}
+		if !containsValue(coresFor(osf), config.Browser.HardwareConcurrency) {
+			config.Browser.HardwareConcurrency = pickWeighted(coresFor(osf), seed("cores"))
+		}
 
-	// 显卡：不在池中（含 "(Build N)" 等不可能的串）时尽量在同厂商里重选，能力参数与之对齐
-	gpu, ok := lookupGPU(osf, config.WebGL.Renderer)
-	if !ok {
-		gpu = pickGPU(osf, gpuFamily(config.WebGL.Vendor, config.WebGL.Renderer), seed("gpu"))
+		// 显卡：不在池中（含 "(Build N)" 等不可能的串）时尽量在同厂商里重选，能力参数与之对齐
+		gpu, ok := lookupGPU(osf, config.WebGL.Renderer)
+		if !ok {
+			gpu = pickGPU(osf, gpuFamily(config.WebGL.Vendor, config.WebGL.Renderer), seed("gpu"))
+		}
+		config.WebGL.Vendor, config.WebGL.Renderer = gpu.Vendor, gpu.Renderer
+		config.WebGL.Version = "WebGL 1.0 (OpenGL ES 2.0 Chromium)"
+		config.WebGL.ShadingLanguageVersion = "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)"
+		config.WebGL.MaxTextureSize, config.WebGL.MaxRenderbufferSize = gpu.Caps.MaxTextureSize, gpu.Caps.MaxRenderbufferSize
 	}
-	config.WebGL.Vendor, config.WebGL.Renderer = gpu.Vendor, gpu.Renderer
-	config.WebGL.Version = "WebGL 1.0 (OpenGL ES 2.0 Chromium)"
-	config.WebGL.ShadingLanguageVersion = "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)"
-	config.WebGL.MaxTextureSize, config.WebGL.MaxRenderbufferSize = gpu.Caps.MaxTextureSize, gpu.Caps.MaxRenderbufferSize
 
 	config.SchemaVersion = fingerprintSchemaVersion
 	after, _ := json.Marshal(config)
@@ -768,7 +784,12 @@ func generateFingerprintFor(userID string, osf OSFamily) *FingerprintConfig {
 		TLSConfig:    fg.generateTLSConfig(r),
 		HTTP2Config:  fg.generateHTTP2Config(r),
 	}
-	c.Browser.UserAgent = canonicalUserAgent(osf, "120")
+	if osf == OSAndroid {
+		c.Device = &DeviceConfig{Kind: deviceKindAndroid}
+		c.Browser.UserAgent = androidUserAgent("120")
+	} else {
+		c.Browser.UserAgent = canonicalUserAgent(osf, "120")
+	}
 	c.Browser.Language = "zh-CN"
 	c.Browser.CookieEnabled = true
 	c.Normalize()
