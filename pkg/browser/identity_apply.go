@@ -141,7 +141,11 @@ type cdpStep struct {
 // applyIdentity 在目标运行前下发身份：页面 / iframe 用 Emulation 原生覆盖并注册注入脚本；
 // Worker 用 Network 覆盖 UA 与 client hints，再执行 Worker 脚本补齐 navigator
 func applyIdentity(call cdpCaller, id *Identity, kind targetKind) error {
-	ua := map[string]any{"userAgent": id.UserAgent, "acceptLanguage": id.AcceptLanguage, "platform": id.Platform, "userAgentMetadata": id.Metadata}
+	ua := map[string]any{"userAgent": id.UserAgent, "acceptLanguage": id.AcceptLanguage, "platform": id.Platform}
+	// Safari 不发 Client Hints：不带 userAgentMetadata 时 Chrome 不发 sec-ch-ua* 请求头（2026-10-17 实测）
+	if !id.NoClientHints {
+		ua["userAgentMetadata"] = id.Metadata
+	}
 	tz := map[string]any{"timezoneId": id.Timezone}
 
 	if kind == kindWorker {
@@ -178,6 +182,10 @@ func applyIdentity(call cdpCaller, id *Identity, kind targetKind) error {
 	// 手机：页面与 iframe 都开触屏模拟（maxTouchPoints、ontouchstart、pointer: coarse 按目标生效）
 	if id.Screen.Mobile {
 		steps = append(steps, cdpStep{"Emulation.setTouchEmulationEnabled", map[string]any{"enabled": true, "maxTouchPoints": androidTouchPoints}})
+	}
+	// iPhone 的屏幕是广色域（color-gamut: p3），宿主是 sRGB；dynamic-range 不能模拟（残余风险）
+	if id.OS == OSIOS {
+		steps = append(steps, cdpStep{"Emulation.setEmulatedMedia", map[string]any{"features": []map[string]any{{"name": "color-gamut", "value": "p3"}}}})
 	}
 	steps = append(steps, cdpStep{"Page.addScriptToEvaluateOnNewDocument", map[string]any{"source": identityScript(id, false)}})
 

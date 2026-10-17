@@ -46,7 +46,12 @@ func (cl *ChromeLauncher) Launch(ctx context.Context, opts *ConnectOptions) (*Ch
 			screenFlags = headlessScreenFlags(configGeometry(cfg))
 		}
 	}
-	mobile := fingerprint != nil && configOS(fingerprint) == OSAndroid
+	osf := OSFamily("")
+	if fingerprint != nil {
+		osf = configOS(fingerprint)
+	}
+	android := osf == OSAndroid
+	mobile := android || osf == OSIOS
 
 	// Setup Xvfb on Linux if headless is false and Xvfb is not disabled
 	if err := cl.setupXvfb(opts); err != nil {
@@ -82,7 +87,8 @@ func (cl *ChromeLauncher) Launch(ctx context.Context, opts *ConnectOptions) (*Ch
 			return nil, err
 		}
 	}
-	if mobile {
+	// 只有安卓：Safari 的插件与 PDF 查看器和桌面 Chrome 原生相同（同样报 5 个插件）
+	if android {
 		if err := disablePDFViewer(userDataDir); err != nil {
 			if tempDir != "" {
 				os.RemoveAll(tempDir)
@@ -93,7 +99,8 @@ func (cl *ChromeLauncher) Launch(ctx context.Context, opts *ConnectOptions) (*Ch
 
 	// Build Chrome flags
 	flags := append(cl.buildChromeFlags(opts, port, userDataDir), screenFlags...)
-	if mobile {
+	// 只有安卓：iPhone Safari 没有 Web Bluetooth 与 navigator.connection，由注入脚本删掉
+	if android {
 		// 安卓 Chrome 有 Web Bluetooth；Linux 版 Chrome 默认关闭，打开后接口是原生的（Mac 版本来就有）
 		flags = appendSwitchValue(flags, "--enable-features=", "WebBluetooth")
 		// 安卓 Chrome 的 navigator.connection 有 type / downlinkMax / ontypechange（桌面版默认关闭），打开后是原生的

@@ -15,11 +15,11 @@ import (
 	"time"
 )
 
-// androidFingerprintDir 写一份指定机型的安卓指纹，返回指纹目录
-func androidFingerprintDir(t *testing.T, userID, model string) string {
+// mobileFingerprintDir 写一份指定系统与机型的手机指纹，返回指纹目录
+func mobileFingerprintDir(t *testing.T, osf OSFamily, userID, model string) string {
 	t.Helper()
 	dir := t.TempDir()
-	cfg := generateFingerprintFor(userID, OSAndroid)
+	cfg := generateFingerprintFor(userID, osf)
 	cfg.Device.Model = model
 	cfg.Normalize()
 	data, err := json.MarshalIndent(cfg, "", "  ")
@@ -35,7 +35,7 @@ func androidFingerprintDir(t *testing.T, userID, model string) string {
 // connectAndroid 用指定机型的安卓身份启动（无界面，默认通道）
 func connectAndroid(t *testing.T, userID, model string) *BrowserInstance {
 	t.Helper()
-	inst, err := Connect(t.Context(), &ConnectOptions{Headless: true, Mobile: true, FingerprintUserID: userID, FingerprintDir: androidFingerprintDir(t, userID, model)})
+	inst, err := Connect(t.Context(), &ConnectOptions{Headless: true, Mobile: true, FingerprintUserID: userID, FingerprintDir: mobileFingerprintDir(t, OSAndroid, userID, model)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,15 +68,15 @@ const androidSurfaceJS = `async () => {
     screen: self.document ? [screen.width, screen.height, devicePixelRatio].join() : null};
 }`
 
-// newAndroidSurfaceServers 主站（主页面 + 专用 Worker + 弹窗）与跨站 iframe 站点，记录请求头
-func newAndroidSurfaceServers(t *testing.T) (main *httptest.Server, headers func(path string) http.Header) {
+// newMobileSurfaceServers 主站（主页面 + 专用 Worker + 弹窗）与跨站 iframe 站点，各表面都执行 js 上报身份，记录请求头
+func newMobileSurfaceServers(t *testing.T, js string) (main *httptest.Server, headers func(path string) http.Header) {
 	t.Helper()
 	var mu sync.Mutex
 	seen := map[string]http.Header{}
 	rec := func(r *http.Request) { mu.Lock(); seen[r.URL.Path] = r.Header.Clone(); mu.Unlock() }
 	frame := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rec(r)
-		fmt.Fprintf(w, `<script>(%s)().then(i => parent.postMessage({frame: 1, info: i}, '*'))</script>`, androidSurfaceJS)
+		fmt.Fprintf(w, `<script>(%s)().then(i => parent.postMessage({frame: 1, info: i}, '*'))</script>`, js)
 	}))
 	frameURL := strings.Replace(frame.URL, "127.0.0.1", "localhost", 1)
 	main = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -89,12 +89,12 @@ window.__r = {};
 info().then(i => window.__r.main = i);
 new Worker('/worker.js').onmessage = e => window.__r.worker = e.data;
 addEventListener('message', e => { if (e.data && e.data.frame) window.__r.iframe = e.data.info; });
-</script><iframe src="%s/f"></iframe>`, androidSurfaceJS, frameURL)
+</script><iframe src="%s/f"></iframe>`, js, frameURL)
 		case "/worker.js":
 			w.Header().Set("Content-Type", "text/javascript")
-			fmt.Fprintf(w, `(%s)().then(i => postMessage(i))`, androidSurfaceJS)
+			fmt.Fprintf(w, `(%s)().then(i => postMessage(i))`, js)
 		case "/popup":
-			fmt.Fprintf(w, `<script>(%s)().then(i => window.__info = i)</script>`, androidSurfaceJS)
+			fmt.Fprintf(w, `<script>(%s)().then(i => window.__info = i)</script>`, js)
 		default:
 			fmt.Fprint(w, `<title>plain</title>`)
 		}
@@ -106,7 +106,7 @@ addEventListener('message', e => { if (e.data && e.data.frame) window.__r.iframe
 
 // TestAndroidIdentityAcrossSurfaces 主页面、跨站 iframe、专用 Worker、弹窗与请求头都是同一台手机（Review Focus 3）
 func TestAndroidIdentityAcrossSurfaces(t *testing.T) {
-	srv, headers := newAndroidSurfaceServers(t)
+	srv, headers := newMobileSurfaceServers(t, androidSurfaceJS)
 	p := connectAndroid(t, "android-surfaces", "PGKM10").Page()
 	if err := p.Navigate(srv.URL + "/"); err != nil {
 		t.Fatal(err)
