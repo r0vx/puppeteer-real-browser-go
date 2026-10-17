@@ -230,14 +230,20 @@ func TestAndroidFontConfig(t *testing.T) {
 	}
 }
 
-// TestAddEnabledFeature 启用 Chrome 功能时合并进已有的 --enable-features（Chrome 只认最后一个同名开关），没有时新加
-func TestAddEnabledFeature(t *testing.T) {
-	got := addEnabledFeature([]string{"--a", "--enable-features=NetworkService,NetworkServiceLogging"}, "WebBluetooth")
-	if strings.Join(got, " ") != "--a --enable-features=NetworkService,NetworkServiceLogging,WebBluetooth" {
-		t.Errorf("merged %v", got)
+// TestAppendSwitchValue 启用 Chrome 功能时合并进最后一个同名开关（Chrome 只认最后一个），没有时新加
+func TestAppendSwitchValue(t *testing.T) {
+	cases := []struct {
+		flags []string
+		want  string
+	}{
+		{[]string{"--a", "--enable-features=NetworkService,NetworkServiceLogging"}, "--a --enable-features=NetworkService,NetworkServiceLogging,WebBluetooth"},
+		{[]string{"--enable-features=A", "--b", "--enable-features=C"}, "--enable-features=A --b --enable-features=C,WebBluetooth"},
+		{[]string{"--a"}, "--a --enable-features=WebBluetooth"},
 	}
-	if got := addEnabledFeature([]string{"--a"}, "WebBluetooth"); strings.Join(got, " ") != "--a --enable-features=WebBluetooth" {
-		t.Errorf("added %v", got)
+	for _, tc := range cases {
+		if got := strings.Join(appendSwitchValue(tc.flags, "--enable-features=", "WebBluetooth"), " "); got != tc.want {
+			t.Errorf("appendSwitchValue(%v) = %q, want %q", tc.flags, got, tc.want)
+		}
 	}
 }
 

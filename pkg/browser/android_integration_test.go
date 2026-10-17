@@ -198,6 +198,7 @@ const androidAPIsJS = `(async () => {
     notifPermission: typeof Notification.permission, notifSource: Function.prototype.toString.call(Notification),
     notifProtoCtor: Notification.prototype.constructor === Notification,
     hasContacts: 'contacts' in navigator, connType: navigator.connection.type,
+    connKeys: Object.getOwnPropertyNames(NetworkInformation.prototype).join(), downlinkMax: String(navigator.connection.downlinkMax),
     removed: ['hid', 'windowControlsOverlay'].filter(k => k in navigator)
       .concat(['EyeDropper', 'SharedWorker', 'documentPictureInPicture', 'queryLocalFonts', 'HID', 'FontData'].filter(k => k in window)),
     chromeApp: 'app' in window.chrome, battery: [b.charging, b.chargingTime, b.dischargingTime, b.level],
@@ -234,6 +235,7 @@ func TestAndroidSurfaceAPIs(t *testing.T) {
 			"notifPermission": "string", "notifSource": "function Notification() { [native code] }", "notifProtoCtor": true,
 			"hasContacts": true, "contacts": "[object ContactsManager]", "contactsProps": "address,email,icon,name,tel",
 			"contactsSelect": "SecurityError", "contactsManager": "function", "connType": "wifi", "chromeApp": false,
+			"connKeys": "onchange,effectiveType,rtt,downlink,saveData,type,downlinkMax,ontypechange,constructor", "downlinkMax": "Infinity",
 			"barcode": "function", "barcodeFormats": true,
 		}
 		for k, v := range want {
@@ -376,7 +378,7 @@ var androidResidual = map[string]string{
 // androidNotCompared 不属于身份、不比较的项目：版本号、用户设置、网络实时值
 var androidNotCompared = []string{
 	"identity.userAgent", "identity.userAgentData.brands", "identity.userAgentData.fullVersionList",
-	"features.connection.effectiveType", "features.connection.rtt", "features.connection.downlinkMax", "features.connection.saveData",
+	"features.connection.effectiveType", "features.connection.rtt", "features.connection.saveData",
 	"media.prefers-color-scheme", "avmedia.voices", "avmedia.devices",
 }
 

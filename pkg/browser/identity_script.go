@@ -261,15 +261,10 @@ if (C.seed && G.OffscreenCanvas && G.OffscreenCanvasRenderingContext2D) {
   });
 }
 if (C.android) {
-  // 内存（页面与 Worker）、网络类型：安卓 Chrome 报告连接类型，桌面没有这个属性
+  // 内存（页面与 Worker）
   for (const N of [G.Navigator, G.WorkerNavigator]) if (N) patchGetter(N.prototype, 'deviceMemory', () => C.android.deviceMemory);
-  if (G.NetworkInformation && !('type' in NetworkInformation.prototype)) {
-    const NI = NetworkInformation.prototype;
-    const check = Object.getOwnPropertyDescriptor(NI, 'effectiveType').get;
-    const get = Object.getOwnPropertyDescriptor({get type() { Reflect.apply(check, this, []); return 'wifi'; }}, 'type').get;
-    masks.set(get, 'function get type() { [native code] }');
-    Object.defineProperty(NI, 'type', {get, enumerable: true, configurable: true});
-  }
+  // 连接类型：手机身份启动时打开了原生的 type / downlinkMax（NetInfoDownlinkMax），这里只把服务器的 ethernet 换成 wifi
+  if (G.NetworkInformation && 'type' in NetworkInformation.prototype) patchGetter(NetworkInformation.prototype, 'type', () => 'wifi');
 }
 `
 

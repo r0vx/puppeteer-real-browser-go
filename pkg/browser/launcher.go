@@ -95,7 +95,9 @@ func (cl *ChromeLauncher) Launch(ctx context.Context, opts *ConnectOptions) (*Ch
 	flags := append(cl.buildChromeFlags(opts, port, userDataDir), screenFlags...)
 	if mobile {
 		// 安卓 Chrome 有 Web Bluetooth；Linux 版 Chrome 默认关闭，打开后接口是原生的（Mac 版本来就有）
-		flags = addEnabledFeature(flags, "WebBluetooth")
+		flags = appendSwitchValue(flags, "--enable-features=", "WebBluetooth")
+		// 安卓 Chrome 的 navigator.connection 有 type / downlinkMax / ontypechange（桌面版默认关闭），打开后是原生的
+		flags = appendSwitchValue(flags, "--enable-blink-features=", "NetInfoDownlinkMax")
 	}
 
 	// DEBUG: 打印实际的Chrome启动参数 (可选)

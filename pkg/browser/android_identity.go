@@ -210,16 +210,17 @@ func androidIdentity(cfg *FingerprintConfig, host hostInfo) (*Identity, error) {
 	}, nil
 }
 
-// addEnabledFeature 启用一个 Chrome 功能：合并进已有的 --enable-features（Chrome 只认最后一个同名开关），没有时新加
-func addEnabledFeature(flags []string, feature string) []string {
-	for i, f := range flags {
-		if strings.HasPrefix(f, "--enable-features=") {
+// appendSwitchValue 给逗号分隔的开关（--enable-features=、--enable-blink-features=）追加一项：
+// 合并进最后一个同名开关（Chrome 只认最后一个），没有时新加
+func appendSwitchValue(flags []string, prefix, value string) []string {
+	for i := len(flags) - 1; i >= 0; i-- {
+		if strings.HasPrefix(flags[i], prefix) {
 			out := append([]string(nil), flags...)
-			out[i] = f + "," + feature
+			out[i] = flags[i] + "," + value
 			return out
 		}
 	}
-	return append(flags, "--enable-features="+feature)
+	return append(flags, prefix+value)
 }
 
 // knownDeviceKind 本版本认识的移动设备类型；更新的版本写的类型不能按桌面规范化回写，否则会毁掉那份指纹
