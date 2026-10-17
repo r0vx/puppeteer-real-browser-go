@@ -121,6 +121,7 @@ func TestAndroidTapAndTypeMatchBaseline(t *testing.T) {
 	}
 
 	var updates []string
+	var downT any
 	for _, e := range got {
 		if e["step"] != "type" {
 			continue
@@ -129,6 +130,12 @@ func TestAndroidTapAndTypeMatchBaseline(t *testing.T) {
 		case "keydown", "keyup":
 			if e["key"] != "Unidentified" || e["code"] != "" || e["keyCode"] != 229.0 {
 				t.Errorf("%s %v, want Unidentified / \"\" / 229", e["type"], e)
+			}
+			// 真机的每次输入法改动共用一个时间戳：keydown 与 keyup 的 timeStamp 相同
+			if e["type"] == "keydown" {
+				downT = e["t"]
+			} else if e["t"] != downT {
+				t.Errorf("keyup t = %v, keydown t = %v; the phone stamps both alike", e["t"], downT)
 			}
 		case "compositionupdate":
 			// 提交组字时 Blink 会再发一次内容相同的 compositionupdate（真机按空格、选词时也一样），连续相同的只算一次

@@ -111,20 +111,26 @@ func mobileScroll(send cdpSend, viewportW, viewportH int, deltaX, deltaY float64
 	return nil
 }
 
-// imeKey 输入法按键事件：key 为 Unidentified、code 为空、keyCode 为 229（安卓真机实测）。
+// imeKey 输入法按键事件：key 为 Unidentified、code 为空、keyCode 为 229（安卓真机实测）；ts 为事件时间（秒）。
 // 不带 nativeVirtualKeyCode：带上 229 后 Chrome 之后的每个 Input.dispatchTouchEvent 都收不到确认（打完字就点不了）
-func imeKey(send cdpSend, typ string) error {
-	return send("Input.dispatchKeyEvent", map[string]any{"type": typ, "key": "Unidentified", "code": "", "windowsVirtualKeyCode": 229})
+func imeKey(send cdpSend, typ string, ts float64) error {
+	return send("Input.dispatchKeyEvent", map[string]any{"type": typ, "key": "Unidentified", "code": "", "windowsVirtualKeyCode": 229, "timestamp": ts})
+}
+
+// imeStamp 一次输入法改动的时间戳（秒）：真机上这次改动的 keydown 与 keyup 共用它（Chromium 的 ImeAdapter 行为）
+func imeStamp() float64 {
+	return float64(time.Now().UnixNano()) / 1e9
 }
 
 // enterKey 输入法上的回车：key Enter、code 为空、keyCode 13（真机实测），浏览器据此产生 keypress 与 insertLineBreak
 func enterKey(send cdpSend) error {
-	down := map[string]any{"type": "keyDown", "key": "Enter", "code": "", "windowsVirtualKeyCode": 13, "nativeVirtualKeyCode": 13, "text": "\r", "unmodifiedText": "\r"}
+	ts := imeStamp() // keydown、keypress、keyup 共用一个时间戳（真机实测）
+	down := map[string]any{"type": "keyDown", "key": "Enter", "code": "", "windowsVirtualKeyCode": 13, "text": "\r", "unmodifiedText": "\r", "timestamp": ts}
 	if err := send("Input.dispatchKeyEvent", down); err != nil {
 		return err
 	}
 	time.Sleep(between(1, 4))
-	return send("Input.dispatchKeyEvent", map[string]any{"type": "keyUp", "key": "Enter", "code": "", "windowsVirtualKeyCode": 13, "nativeVirtualKeyCode": 13})
+	return send("Input.dispatchKeyEvent", map[string]any{"type": "keyUp", "key": "Enter", "code": "", "windowsVirtualKeyCode": 13, "timestamp": ts})
 }
 
 // mobileType 按手机输入法的组字方式输入：每个字是 keydown（229）→ 组字更新为当前整个词 → keyup（229）；
@@ -157,18 +163,20 @@ func mobileType(send cdpSend, text string) error {
 			if err := commit(); err != nil {
 				return err
 			}
-			if err := imeKey(send, "rawKeyDown"); err != nil {
+			ts := imeStamp()
+			if err := imeKey(send, "rawKeyDown", ts); err != nil {
 				return err
 			}
 			if err := send("Input.insertText", map[string]any{"text": " "}); err != nil {
 				return err
 			}
 			time.Sleep(between(5, 10))
-			if err := imeKey(send, "keyUp"); err != nil {
+			if err := imeKey(send, "keyUp", ts); err != nil {
 				return err
 			}
 		default:
-			if err := imeKey(send, "rawKeyDown"); err != nil {
+			ts := imeStamp()
+			if err := imeKey(send, "rawKeyDown", ts); err != nil {
 				return err
 			}
 			word = append(word, r)
@@ -177,7 +185,7 @@ func mobileType(send cdpSend, text string) error {
 				return err
 			}
 			time.Sleep(between(5, 10))
-			if err := imeKey(send, "keyUp"); err != nil {
+			if err := imeKey(send, "keyUp", ts); err != nil {
 				return err
 			}
 		}
