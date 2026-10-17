@@ -259,16 +259,20 @@
     'audio/webm; codecs="opus"', 'audio/ogg; codecs="vorbis"', 'audio/ogg; codecs="opus"', 'audio/wav', 'audio/flac',
     'audio/aac', 'audio/x-m4a'];
 
-  // voices 语音数量与前 5 个（列表为空时等 voiceschanged 最多 1 秒）；没有语音接口时为 null
+  // voices 语音数量与前 5 个（列表为空时等 voiceschanged 最多 1 秒，timedOut 表示等到超时仍为空）；没有语音接口时为 null
   async function voices() {
     if (!('speechSynthesis' in window)) return null;
     let list = speechSynthesis.getVoices();
+    let timedOut = false;
     if (!list.length) {
       list = await withTimeout(new Promise(function (r) {
         speechSynthesis.addEventListener('voiceschanged', function () { r(speechSynthesis.getVoices()); }, { once: true });
-      }), 1000, []);
+      }), 1000, null);
+      timedOut = list === null;
+      list = list || [];
     }
-    return { count: list.length, first: list.slice(0, 5).map(function (v) { return { name: v.name, lang: v.lang }; }) };
+    return { count: list.length, timedOut: timedOut,
+      first: list.slice(0, 5).map(function (v) { return { name: v.name, lang: v.lang }; }) };
   }
 
   // avmedia 语音、音视频解码支持、媒体设备（只记各类数量）
@@ -311,15 +315,17 @@
 
   // ---------- 交互记录 ----------
   const MAX_EVENTS = 600;
-  const EVENT_TYPES = ['pointerover', 'pointerenter', 'pointerdown', 'pointermove', 'pointerup', 'pointercancel',
-    'pointerout', 'pointerleave', 'touchstart', 'touchmove', 'touchend', 'touchcancel', 'mouseover', 'mousemove',
-    'mousedown', 'mouseup', 'click', 'keydown', 'keypress', 'keyup', 'beforeinput', 'input', 'compositionstart',
-    'compositionupdate', 'compositionend', 'scroll'];
-  const FIELDS = ['pointerType', 'pointerId', 'isPrimary', 'width', 'height', 'pressure', 'tangentialPressure', 'tiltX',
-    'tiltY', 'twist', 'button', 'buttons', 'detail', 'clientX', 'clientY', 'screenX', 'screenY', 'key', 'code', 'keyCode',
-    'which', 'location', 'repeat', 'isComposing', 'inputType', 'data'];
+  const EVENT_TYPES = ['pointerover', 'pointerenter', 'pointerdown', 'pointermove', 'pointerrawupdate', 'pointerup',
+    'pointercancel', 'pointerout', 'pointerleave', 'gotpointercapture', 'lostpointercapture', 'touchstart', 'touchmove',
+    'touchend', 'touchcancel', 'mouseover', 'mouseenter', 'mousemove', 'mousedown', 'mouseup', 'mouseout', 'mouseleave',
+    'click', 'keydown', 'keypress', 'keyup', 'beforeinput', 'input', 'compositionstart', 'compositionupdate',
+    'compositionend', 'scroll'];
+  const FIELDS = ['cancelable', 'pointerType', 'pointerId', 'isPrimary', 'width', 'height', 'pressure', 'tangentialPressure',
+    'tiltX', 'tiltY', 'twist', 'button', 'buttons', 'detail', 'clientX', 'clientY', 'screenX', 'screenY', 'key', 'code',
+    'keyCode', 'which', 'location', 'repeat', 'isComposing', 'inputType', 'data'];
   const interaction = { events: [], truncated: false, steps: { tap: false, type: false, swipe: false } };
-  let t0 = null;
+  // t 按事件自带的 timeStamp 计；rt 按记录时的 performance.now() 计（Safari 18.5 软键盘事件的 timeStamp 是常数，只能靠 rt）
+  let t0 = null, p0 = null;
 
   // stepOf 事件发生在哪一步的区域
   function stepOf(el) {
@@ -342,13 +348,15 @@
   function record(e) {
     try {
       if (interaction.events.length >= MAX_EVENTS) { interaction.truncated = true; return; }
-      if (t0 === null) t0 = e.timeStamp;
+      const now = performance.now();
+      if (t0 === null) { t0 = e.timeStamp; p0 = now; }
       const el = e.target && e.target.nodeType === 1 ? e.target : null;
       const ev = { step: stepOf(el), type: e.type, isTrusted: e.isTrusted, t: Math.round((e.timeStamp - t0) * 10) / 10,
-        target: el ? (el.id || el.tagName.toLowerCase()) : 'document' };
+        rt: Math.round((now - p0) * 10) / 10, target: el ? (el.id || el.tagName.toLowerCase()) : 'document' };
       for (const k of FIELDS) if (e[k] !== undefined) ev[k] = e[k];
+      if (typeof e.getCoalescedEvents === 'function') ev.coalesced = e.getCoalescedEvents().length;
       if (e.touches) { ev.touches = touchList(e.touches); ev.changedTouches = touchList(e.changedTouches); }
-      if (e.type === 'scroll' && el) ev.scrollTop = el.scrollTop;
+      if (e.type === 'scroll') ev.scrollTop = el ? el.scrollTop : (document.scrollingElement || document.documentElement).scrollTop;
       interaction.events.push(ev);
     } catch (err) {
       // 记录失败不影响页面
@@ -396,6 +404,8 @@
     finished = true;
     status('正在上传…');
     const auto = await autoPromise;
+    // 手机浏览器的工具栏会随滚动收起，视口在交互后可能变化，结束时再采一次
+    interaction.screenAtFinish = safe(screenInfo);
     const result = { schema: 1, collectedAt: new Date().toISOString(), auto: auto, interaction: interaction };
     const text = JSON.stringify(result);
     window.__baselineResult = result;

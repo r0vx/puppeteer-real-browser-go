@@ -249,3 +249,71 @@ func TestBaselineCollectorUpload(t *testing.T) {
 		}
 	})
 }
+
+// TestBaselineCollectorRecordsDetail 交互记录给 M2 对照用的细节：按 performance.now 计的 rt（Safari 18.5 软键盘事件的
+// timeStamp 是常数）、cancelable、合并事件数、指针捕获与进出事件、页面整体滚动的位置；结束时再采一次视口；语音等待超时有标记
+func TestBaselineCollectorRecordsDetail(t *testing.T) {
+	srv, posted := baselineServer(t, "", http.StatusOK)
+	p, auto := openBaseline(t, srv)
+	if voices, _ := baselineGroup(t, auto, "avmedia")["voices"].(map[string]any); voices == nil {
+		t.Error("avmedia.voices missing")
+	} else if _, ok := voices["timedOut"].(bool); !ok {
+		t.Errorf("avmedia.voices.timedOut = %v, want a bool", voices["timedOut"])
+	}
+	if _, err := p.Evaluate(`(() => {
+		const b = document.getElementById('tap-btn');
+		b.dispatchEvent(new PointerEvent('gotpointercapture', {bubbles: true}));
+		b.dispatchEvent(new PointerEvent('pointermove', {bubbles: true, cancelable: true}));
+		b.dispatchEvent(new MouseEvent('mouseleave'));
+		document.dispatchEvent(new Event('scroll'));
+		setTimeout(() => window.finishBaseline(), 30);
+		return true;
+	})()`); err != nil {
+		t.Fatal(err)
+	}
+	var body struct {
+		Interaction struct {
+			Events         []map[string]any `json:"events"`
+			ScreenAtFinish map[string]any   `json:"screenAtFinish"`
+		} `json:"interaction"`
+	}
+	select {
+	case raw := <-posted:
+		if err := json.Unmarshal(raw, &body); err != nil {
+			t.Fatalf("decode posted result: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("nothing posted to /result")
+	}
+	byType := map[string]map[string]any{}
+	last := -1.0
+	for _, e := range body.Interaction.Events {
+		byType[fmt.Sprint(e["type"])] = e
+		rt, ok := e["rt"].(float64)
+		if !ok || rt < last {
+			t.Errorf("%v: rt = %v after %v, want a non-decreasing number", e["type"], e["rt"], last)
+		}
+		last = rt
+	}
+	for _, typ := range []string{"gotpointercapture", "pointermove", "mouseleave", "scroll"} {
+		if byType[typ] == nil {
+			t.Errorf("%s not recorded", typ)
+		}
+	}
+	if mv := byType["pointermove"]; mv != nil {
+		if mv["cancelable"] != true {
+			t.Errorf("pointermove cancelable = %v, want true", mv["cancelable"])
+		}
+		if _, ok := mv["coalesced"].(float64); !ok {
+			t.Errorf("pointermove coalesced = %v, want a count", mv["coalesced"])
+		}
+	}
+	if sc := byType["scroll"]; sc != nil {
+		if _, ok := sc["scrollTop"].(float64); !ok || sc["target"] != "document" {
+			t.Errorf("document scroll = %v, want target document with scrollTop", sc)
+		}
+	}
+	if _, ok := body.Interaction.ScreenAtFinish["innerWidth"].(float64); !ok {
+		t.Errorf("interaction.screenAtFinish = %v, want the viewport measured again", body.Interaction.ScreenAtFinish)
+	}
+}
