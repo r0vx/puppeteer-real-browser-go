@@ -274,3 +274,26 @@ func TestAndroidTypeThenTap(t *testing.T) {
 		t.Errorf("values / clicks = %v, want abcd|pw|a,a,b,go", v)
 	}
 }
+
+// TestAndroidControlChars 退格在页面上的效果与桌面一致：组字中删组字，没有组字时删已提交的字
+func TestAndroidControlChars(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, enterPage) }))
+	defer srv.Close()
+	p := connectAndroid(t, "android-ctrl", "PGKM10").Page()
+	sp := p.(*CustomCDPPage)
+	if err := p.Navigate(srv.URL); err != nil {
+		t.Fatal(err)
+	}
+	if err := sp.SendKeys("#i", "ab\bc"); err != nil {
+		t.Fatal(err)
+	}
+	if err := sp.RealSendKeys("\b"); err != nil {
+		t.Fatal(err)
+	}
+	if v, _ := p.Evaluate(`document.getElementById('i').value`); v != "a" {
+		t.Errorf("value %v, want a (ab, backspace, c, then backspace)", v)
+	}
+	if err := sp.RealSendKeys("x\ty"); err == nil {
+		t.Error("tab was typed instead of rejected")
+	}
+}

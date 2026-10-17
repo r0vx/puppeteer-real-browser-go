@@ -156,3 +156,37 @@ func TestMobileScrollSplits(t *testing.T) {
 		t.Errorf("%d swipes dragging %v px in total, want 3 swipes and 1000 px", starts, total)
 	}
 }
+
+// TestMobileTypeControlChars 控制字符与桌面效果一致：\r 同 \n 是回车；组字中的退格缩短组字，没有组字时发退格键；其他控制字符报错
+func TestMobileTypeControlChars(t *testing.T) {
+	summary := func(text string) (string, error) {
+		send, log := recordCDP()
+		err := mobileType(send, text)
+		var got []string
+		for _, c := range *log {
+			switch c.Method {
+			case "Input.insertText", "Input.imeSetComposition":
+				got = append(got, c.Method[6:]+":"+c.Params["text"].(string))
+			case "Input.dispatchKeyEvent":
+				if k := c.Params["key"]; k != "Unidentified" {
+					got = append(got, c.Params["type"].(string)+":"+k.(string))
+				}
+			}
+		}
+		return strings.Join(got, ","), err
+	}
+	cases := []struct{ text, want string }{
+		{"a\rb", "imeSetComposition:a,insertText:a,keyDown:Enter,keyUp:Enter,imeSetComposition:b,insertText:b"},
+		{"ab\bc", "imeSetComposition:a,imeSetComposition:ab,imeSetComposition:a,imeSetComposition:ac,insertText:ac"},
+		{"a\b", "imeSetComposition:a,imeSetComposition:"},
+		{"\bx", "rawKeyDown:Backspace,keyUp:Backspace,imeSetComposition:x,insertText:x"},
+	}
+	for _, tc := range cases {
+		if got, err := summary(tc.text); err != nil || got != tc.want {
+			t.Errorf("mobileType(%q) = %s (%v)\nwant %s", tc.text, got, err, tc.want)
+		}
+	}
+	if _, err := summary("x\ty"); err == nil || !strings.Contains(err.Error(), "U+0009") {
+		t.Errorf("tab: err = %v, want an unsupported control character error", err)
+	}
+}

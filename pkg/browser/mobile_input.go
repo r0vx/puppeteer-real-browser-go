@@ -1,10 +1,12 @@
 package browser
 
 import (
+	"fmt"
 	"math"
 	"math/rand"
 	"sync"
 	"time"
+	"unicode"
 	"unicode/utf16"
 )
 
@@ -134,7 +136,7 @@ func enterKey(send cdpSend) error {
 }
 
 // mobileType 按手机输入法的组字方式输入：每个字是 keydown（229）→ 组字更新为当前整个词 → keyup（229）；
-// 空格与换行先提交当前词；文本结束时提交（点按已有焦点的输入框不会结束组字，不提交的话下一次输入会把这个词替换掉）
+// 空格与换行（\n、\r）先提交当前词，退格在组字中缩短组字；其他控制字符报错（手机键盘没有 Tab 等键）；文本结束时提交（点按已有焦点的输入框不会结束组字，不提交的话下一次输入会把这个词替换掉）
 func mobileType(send cdpSend, text string) error {
 	var word []rune
 	commit := func() error {
@@ -152,11 +154,23 @@ func mobileType(send cdpSend, text string) error {
 		}
 		first = false
 		switch r {
-		case '\n':
+		case '\n', '\r':
 			if err := commit(); err != nil {
 				return err
 			}
 			if err := enterKey(send); err != nil {
+				return err
+			}
+		case '\b':
+			// 退格：组字中缩短组字（减到空即取消组字），没有组字时发退格键
+			if len(word) == 0 {
+				if err := backspaceKey(send); err != nil {
+					return err
+				}
+				continue
+			}
+			word = word[:len(word)-1]
+			if err := composeStep(send, word); err != nil {
 				return err
 			}
 		case ' ':
@@ -175,20 +189,41 @@ func mobileType(send cdpSend, text string) error {
 				return err
 			}
 		default:
-			ts := imeStamp()
-			if err := imeKey(send, "rawKeyDown", ts); err != nil {
-				return err
+			if unicode.IsControl(r) {
+				return fmt.Errorf("mobile typing does not support control character %U", r)
 			}
 			word = append(word, r)
-			n := len(utf16.Encode(word))
-			if err := send("Input.imeSetComposition", map[string]any{"text": string(word), "selectionStart": n, "selectionEnd": n}); err != nil {
-				return err
-			}
-			time.Sleep(between(5, 10))
-			if err := imeKey(send, "keyUp", ts); err != nil {
+			if err := composeStep(send, word); err != nil {
 				return err
 			}
 		}
 	}
 	return commit()
+}
+
+// composeStep 一次组字改动：keydown(229) → 组字更新为 word（空串即取消组字）→ keyup(229)，按下与抬起共用时间戳
+func composeStep(send cdpSend, word []rune) error {
+	ts := imeStamp()
+	if err := imeKey(send, "rawKeyDown", ts); err != nil {
+		return err
+	}
+	n := len(utf16.Encode(word))
+	if err := send("Input.imeSetComposition", map[string]any{"text": string(word), "selectionStart": n, "selectionEnd": n}); err != nil {
+		return err
+	}
+	time.Sleep(between(5, 10))
+	return imeKey(send, "keyUp", ts)
+}
+
+// backspaceKey 没有组字时的退格键：key Backspace、code 为空、keyCode 8，按下与抬起共用时间戳
+func backspaceKey(send cdpSend) error {
+	ts := imeStamp()
+	key := func(typ string) map[string]any {
+		return map[string]any{"type": typ, "key": "Backspace", "code": "", "windowsVirtualKeyCode": 8, "timestamp": ts}
+	}
+	if err := send("Input.dispatchKeyEvent", key("rawKeyDown")); err != nil {
+		return err
+	}
+	time.Sleep(between(1, 4))
+	return send("Input.dispatchKeyEvent", key("keyUp"))
 }
