@@ -17,6 +17,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -101,7 +102,10 @@ type baselineSummary struct {
 		Identity struct {
 			UserAgent     string `json:"userAgent"`
 			UserAgentData *struct {
-				Model string `json:"model"`
+				Model  string `json:"model"`
+				Brands []struct {
+					Brand string `json:"brand"`
+				} `json:"brands"`
 			} `json:"userAgentData"`
 		} `json:"identity"`
 	} `json:"auto"`
@@ -130,11 +134,14 @@ func (s *server) handleResult() http.HandlerFunc {
 		pretty.WriteByte('\n')
 
 		id := sum.Auto.Identity
-		model := ""
+		model, brands := "", []string(nil)
 		if id.UserAgentData != nil {
 			model = id.UserAgentData.Model
+			for _, b := range id.UserAgentData.Brands {
+				brands = append(brands, b.Brand)
+			}
 		}
-		name, err := writeUnique(s.outDir, baselineName(id.UserAgent, model), pretty.Bytes())
+		name, err := writeUnique(s.outDir, baselineName(id.UserAgent, model, brands), pretty.Bytes())
 		if err != nil {
 			http.Error(w, "save result: "+err.Error(), http.StatusInternalServerError)
 			return
@@ -145,12 +152,13 @@ func (s *server) handleResult() http.HandlerFunc {
 	}
 }
 
-// otherChromium UA 里也带 Chrome/ 的其他浏览器：采集必须用正版 Chrome，这些记为 other，检查时能发现用错
-var otherChromium = []string{"Edg", "OPR/", "MiuiBrowser", "XiaoMi/", "SamsungBrowser", "HeyTapBrowser", "UCBrowser",
-	"MQQBrowser", "HuaweiBrowser", "VivoBrowser", "Quark", "baidu"}
+// safariUA 正版 Safari 的 UA 结尾；iOS 上的第三方浏览器与 App 内嵌页（CriOS、EdgiOS、微信等）都不符合
+var safariUA = regexp.MustCompile(`Version/[\d.]+ (Mobile/\w+ )?Safari/[\d.]+$`)
 
-// baselineName 由 UA 与机型推导结果文件的基本名：<系统>-<浏览器>-<机型>
-func baselineName(ua, model string) string {
+// baselineName 由 UA、Client Hints 品牌与机型推导结果文件的基本名：<系统>-<浏览器>-<机型>。
+// 采集必须用正版浏览器，所以判定从严：Client Hints 品牌里有 Google Chrome 且不是内嵌 WebView 才算 chrome，
+// UA 以 Safari 原样结尾才算 safari；厂商浏览器、App 内嵌页、iOS 上的 Chrome 等一律记为 other，检查时能发现用错
+func baselineName(ua, model string, brands []string) string {
 	osName := "other"
 	switch {
 	case strings.Contains(ua, "iPhone"), strings.Contains(ua, "iPad"):
@@ -160,16 +168,9 @@ func baselineName(ua, model string) string {
 	}
 	browser := "other"
 	switch {
-	case strings.Contains(ua, "CriOS/"):
+	case slices.Contains(brands, "Google Chrome") && !strings.Contains(ua, "; wv)"):
 		browser = "chrome"
-	case strings.Contains(ua, "Chrome/"):
-		browser = "chrome"
-		for _, s := range otherChromium {
-			if strings.Contains(ua, s) {
-				browser = "other"
-			}
-		}
-	case strings.Contains(ua, "Version/") && strings.Contains(ua, "Safari/"):
+	case len(brands) == 0 && safariUA.MatchString(ua):
 		browser = "safari"
 	}
 	if model == "" && osName == "ios" {
