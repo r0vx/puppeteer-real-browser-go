@@ -448,3 +448,66 @@ func TestAndroidSetViewportClamps(t *testing.T) {
 		t.Errorf("viewport after SetViewport(1920, 1080) = %v, want 411,810,411,810,411,914", got)
 	}
 }
+
+// androidShapesJS 手写接口与原生的可比较特征：报错栈有没有注入帧、stack 描述符、报错文字、prototype 描述符、原型键顺序、Worker 里的表现
+const androidShapesJS = `(async () => {
+  const desc = e => Object.keys(Object.getOwnPropertyDescriptor(e, 'stack') || {}).sort().join();
+  let nativeDesc; try { document.createElement(''); } catch (e) { nativeDesc = desc(e); }
+  const out = {};
+  try { new Notification('x'); } catch (e) { out.notifFrame = /at (new )?Notification/.test(e.stack); out.notifDesc = desc(e) === nativeDesc; }
+  try { Notification('x'); } catch (e) { out.notifCallFrame = /at (new )?Notification/.test(e.stack); }
+  try { new Notification(); } catch (e) { out.notifZero = e.message; }
+  try { new ContactsManager(); } catch (e) { out.cmNew = e.message; out.cmFrame = /at (new )?ContactsManager/.test(e.stack); }
+  try { ContactsManager(); } catch (e) { out.cmCall = e.message; }
+  out.cmProtoWritable = Object.getOwnPropertyDescriptor(ContactsManager, 'prototype').writable;
+  out.cmKeys = Reflect.ownKeys(ContactsManager.prototype).map(String).join();
+  out.worker = await new Promise(r => {
+    const src = "let n; try { new Notification('x'); n = 'constructs'; } catch (e) { n = e.message; } postMessage([n, typeof BarcodeDetector])";
+    const w = new Worker(URL.createObjectURL(new Blob([src], {type: 'text/javascript'})));
+    w.onmessage = e => r(e.data.join('|'));
+  });
+  out.bdLength = BarcodeDetector.length;
+  out.bdKeys = Reflect.ownKeys(BarcodeDetector.prototype).map(String).join();
+  out.bdProtoWritable = Object.getOwnPropertyDescriptor(BarcodeDetector, 'prototype').writable;
+  try { new BarcodeDetector({formats: []}); } catch (e) { out.bdEmpty = e.message; out.bdFrame = /at (new )?BarcodeDetector/.test(e.stack); }
+  try { new BarcodeDetector({formats: 'qr_code'}); } catch (e) { out.bdString = e.message; }
+  try { new BarcodeDetector({formats: ['nope']}); } catch (e) { out.bdUnknown = e.message; }
+  try { await new BarcodeDetector().detect(); } catch (e) { out.bdDetect = e.message; }
+  return JSON.stringify(out);
+})()`
+
+// TestAndroidFakeAPIShapes 手写的 Notification / ContactsManager / BarcodeDetector 与原生无法区分（BarcodeDetector 在 Mac 宿主上是原生的，
+// 同一组断言在 Mac 上验证的是原生行为、在 Linux 上验证的是手写版本，两边一致即说明手写版本与原生相同）
+func TestAndroidFakeAPIShapes(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, `<title>plain</title>`) }))
+	defer srv.Close()
+	p := connectAndroid(t, "android-shapes", "PGKM10").Page()
+	if err := p.Navigate(srv.URL); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]any{}
+	if err := json.Unmarshal([]byte(awaitJS(t, p, androidShapesJS)), &got); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{
+		"notifFrame": false, "notifCallFrame": false, "notifDesc": true,
+		"notifZero":       "Failed to construct 'Notification': 1 argument required, but only 0 present.",
+		"cmNew":           "Failed to construct 'ContactsManager': Illegal constructor",
+		"cmCall":          "Failed to construct 'ContactsManager': Please use the 'new' operator, this DOM object constructor cannot be called as a function.",
+		"cmFrame":         false,
+		"cmProtoWritable": false,
+		"cmKeys":          "getProperties,select,constructor,Symbol(Symbol.toStringTag)",
+		"worker":          "Failed to construct 'Notification': Illegal constructor. Use ServiceWorkerRegistration.showNotification() instead.|function",
+		"bdLength":        0.0, "bdKeys": "detect,constructor,Symbol(Symbol.toStringTag)", "bdProtoWritable": false,
+		"bdEmpty":   "Failed to construct 'BarcodeDetector': Hint option provided, but is empty.",
+		"bdFrame":   false,
+		"bdString":  "Failed to construct 'BarcodeDetector': Failed to read the 'formats' property from 'BarcodeDetectorOptions': The provided value cannot be converted to a sequence.",
+		"bdUnknown": "Failed to construct 'BarcodeDetector': Failed to read the 'formats' property from 'BarcodeDetectorOptions': The provided value 'nope' is not a valid enum value of type BarcodeFormat.",
+		"bdDetect":  "Failed to execute 'detect' on 'BarcodeDetector': 1 argument required, but only 0 present.",
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("%s = %v, want %v", k, got[k], v)
+		}
+	}
+}

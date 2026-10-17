@@ -164,6 +164,26 @@ const patchGetter = (obj, key, impl) => {
   const fake = Object.getOwnPropertyDescriptor({get [key]() { Reflect.apply(original, this, []); return impl(original, this); }}, key).get;
   Object.defineProperty(target, key, {get: disguise(fake, original)});
 };
+// 手写接口抛出的错误去掉注入代码那一帧：调用栈从调用方开始，与原生接口一致（captureStackTrace 在页面脚本之前取得）
+const captureStackTrace = Error.captureStackTrace;
+const strip = (e, fn) => {
+  if (typeof captureStackTrace === 'function' && e !== null && typeof e === 'object') Reflect.apply(captureStackTrace, Error, [e, fn]);
+  return e;
+};
+// fakeInterface 手写的接口类：prototype 不可写；方法在前，constructor 与 toStringTag 在后（与原生的键顺序一致）
+const fakeInterface = (Ctor, name, methods) => {
+  masks.set(Ctor, 'function ' + name + '() { [native code] }');
+  const proto = Ctor.prototype;
+  delete proto.constructor;
+  for (const [k, fn] of Object.entries(methods)) {
+    masks.set(fn, 'function ' + k + '() { [native code] }');
+    Object.defineProperty(proto, k, {value: fn, writable: true, enumerable: true, configurable: true});
+  }
+  Object.defineProperty(proto, 'constructor', {value: Ctor, writable: true, enumerable: false, configurable: true});
+  Object.defineProperty(proto, Symbol.toStringTag, {value: name, configurable: true});
+  Object.defineProperty(Ctor, 'prototype', {writable: false});
+  Object.defineProperty(G, name, {value: Ctor, writable: true, enumerable: false, configurable: true});
+};
 const hash = (n) => {
   let h = Math.imul(n ^ C.seed, 2654435761) >>> 0;
   h ^= h >>> 15;
@@ -265,6 +285,60 @@ if (C.android) {
   for (const N of [G.Navigator, G.WorkerNavigator]) if (N) patchGetter(N.prototype, 'deviceMemory', () => C.android.deviceMemory);
   // 连接类型：手机身份启动时打开了原生的 type / downlinkMax（NetInfoDownlinkMax），这里只把服务器的 ethernet 换成 wifi
   if (G.NetworkInformation && 'type' in NetworkInformation.prototype) patchGetter(NetworkInformation.prototype, 'type', () => 'wifi');
+  // Notification：安卓只能经 ServiceWorkerRegistration.showNotification 发通知，new 时抛错（页面与 Worker）；
+  // 不加 new、不带参数时交给原生报错；静态成员与原型保持原生
+  if (G.Notification) {
+    const Orig = G.Notification;
+    const Fake = function Notification(title) {
+      try {
+        if (new.target === undefined) return Reflect.apply(Orig, this, arguments);
+        if (arguments.length === 0) return Reflect.construct(Orig, [], new.target);
+      } catch (e) {
+        throw strip(e, Fake);
+      }
+      throw strip(new TypeError("Failed to construct 'Notification': Illegal constructor. Use ServiceWorkerRegistration.showNotification() instead."), Fake);
+    };
+    for (const [k, d] of Object.entries(Object.getOwnPropertyDescriptors(Orig))) {
+      if (k !== 'length' && k !== 'name' && k !== 'prototype') Object.defineProperty(Fake, k, d);
+    }
+    Object.defineProperty(Fake, 'prototype', {value: Orig.prototype, writable: false});
+    Object.defineProperty(Orig.prototype, 'constructor', {value: Fake, writable: true, enumerable: false, configurable: true});
+    Object.setPrototypeOf(Fake, Object.getPrototypeOf(Orig));
+    disguise(Fake, Orig);
+    Object.defineProperty(G, 'Notification', {value: Fake, writable: true, enumerable: false, configurable: true});
+  }
+  // 条码识别：安卓与 Mac 版 Chrome 有（页面与 Worker），Linux 版没有。宿主没有时补上：
+  // 参数校验与报错文字照原生，支持安卓的格式，识别结果为空（看不到条码）
+  // Worker 注入时（启动前暂停处）isSecureContext 还没确定，读到的是 false：Worker 里不检查（页面是安全上下文时 Worker 也是）
+  if (!G.BarcodeDetector && (G.isSecureContext || !G.document)) {
+    const formats = ['aztec', 'code_128', 'code_39', 'code_93', 'codabar', 'data_matrix', 'ean_13', 'ean_8', 'itf', 'pdf417', 'qr_code', 'upc_a', 'upc_e'];
+    const BD = function BarcodeDetector() {
+      const fail = (msg) => strip(new TypeError("Failed to construct 'BarcodeDetector': " + msg), BD);
+      if (new.target === undefined) throw fail("Please use the 'new' operator, this DOM object constructor cannot be called as a function.");
+      const options = arguments[0];
+      if (options === undefined || options === null) return;
+      if (typeof options !== 'object' && typeof options !== 'function') throw fail("The provided value is not of type 'BarcodeDetectorOptions'.");
+      const wanted = options.formats;
+      if (wanted === undefined) return;
+      const read = "Failed to read the 'formats' property from 'BarcodeDetectorOptions': ";
+      if (wanted === null || typeof wanted !== 'object' || typeof wanted[Symbol.iterator] !== 'function') throw fail(read + 'The provided value cannot be converted to a sequence.');
+      const list = Array.from(wanted, String);
+      const bad = list.find(f => !formats.includes(f));
+      if (bad !== undefined) throw fail(read + "The provided value '" + bad + "' is not a valid enum value of type BarcodeFormat.");
+      if (!list.length) throw fail('Hint option provided, but is empty.');
+    };
+    const getSupportedFormats = {getSupportedFormats() { return Promise.resolve(formats.slice()); }}.getSupportedFormats;
+    masks.set(getSupportedFormats, 'function getSupportedFormats() { [native code] }');
+    Object.defineProperty(BD, 'getSupportedFormats', {value: getSupportedFormats, writable: true, enumerable: true, configurable: true});
+    const detect = {detect(image) {
+      if (!(this instanceof BD)) return Promise.reject(strip(new TypeError('Illegal invocation'), detect));
+      if (arguments.length === 0) {
+        return Promise.reject(strip(new TypeError("Failed to execute 'detect' on 'BarcodeDetector': 1 argument required, but only 0 present."), detect));
+      }
+      return Promise.resolve([]);
+    }}.detect;
+    fakeInterface(BD, 'BarcodeDetector', {detect});
+  }
 }
 `
 
@@ -385,76 +459,37 @@ if (C.android) {
   // 屏幕录制（getDisplayMedia）与采集句柄只有桌面 Chrome 有
   if (G.MediaDevices) for (const k of ['getDisplayMedia', 'setCaptureHandleConfig']) delete MediaDevices.prototype[k];
   if (G.chrome) delete G.chrome.app;
-  // Notification：安卓只能经 ServiceWorkerRegistration.showNotification 发通知，new 时抛错；静态成员与原型保持原生
-  if (G.Notification) {
-    const Orig = G.Notification;
-    const Fake = function Notification(title) {
-      if (new.target === undefined) return Reflect.apply(Orig, this, arguments);
-      throw new TypeError("Failed to construct 'Notification': Illegal constructor. Use ServiceWorkerRegistration.showNotification() instead.");
-    };
-    for (const [k, d] of Object.entries(Object.getOwnPropertyDescriptors(Orig))) {
-      if (k !== 'length' && k !== 'name' && k !== 'prototype') Object.defineProperty(Fake, k, d);
-    }
-    Object.defineProperty(Fake, 'prototype', {value: Orig.prototype, writable: false});
-    Object.defineProperty(Orig.prototype, 'constructor', {value: Fake, writable: true, enumerable: false, configurable: true});
-    Object.setPrototypeOf(Fake, Object.getPrototypeOf(Orig));
-    disguise(Fake, Orig);
-    Object.defineProperty(G, 'Notification', {value: Fake, writable: true, enumerable: false, configurable: true});
-  }
   // 通讯录选择器（Contact Picker）：只在安全上下文、只有安卓有
   if (G.isSecureContext && !('contacts' in Navigator.prototype)) {
     const N = Navigator.prototype;
     const receiverCheck = Object.getOwnPropertyDescriptor(N, 'userAgent').get;
-    const CM = function ContactsManager() { throw new TypeError('Illegal constructor'); };
-    masks.set(CM, 'function ContactsManager() { [native code] }');
-    const proto = CM.prototype;
-    const isManager = (self) => { if (!(self instanceof CM)) throw new TypeError('Illegal invocation'); };
-    const addProtoMethod = (name, fn) => {
-      masks.set(fn, 'function ' + name + '() { [native code] }');
-      Object.defineProperty(proto, name, {value: fn, writable: true, enumerable: true, configurable: true});
+    const CM = function ContactsManager() {
+      throw strip(new TypeError(new.target === undefined
+        ? "Failed to construct 'ContactsManager': Please use the 'new' operator, this DOM object constructor cannot be called as a function."
+        : "Failed to construct 'ContactsManager': Illegal constructor"), CM);
     };
-    addProtoMethod('getProperties', {getProperties() {
-      try { isManager(this); } catch (e) { return Promise.reject(e); }
+    const isManager = (self, fn) => { if (!(self instanceof CM)) throw strip(new TypeError('Illegal invocation'), fn); };
+    const getProperties = {getProperties() {
+      try { isManager(this, getProperties); } catch (e) { return Promise.reject(e); }
       return Promise.resolve(['address', 'email', 'icon', 'name', 'tel']);
-    }}.getProperties);
-    // 没有用户手势时与真机一样拒绝；有手势时当作用户关掉了选择框（真机返回空列表）
-    addProtoMethod('select', {select(properties) {
-      try { isManager(this); } catch (e) { return Promise.reject(e); }
+    }}.getProperties;
+    // 只允许顶层页面；没有用户手势时与真机一样拒绝；有手势时当作用户关掉了选择框（真机返回空列表）
+    const select = {select(properties) {
+      try { isManager(this, select); } catch (e) { return Promise.reject(e); }
+      if (G !== G.top) {
+        return Promise.reject(strip(new DOMException("Failed to execute 'select' on 'ContactsManager': The contacts API can only be used in the top frame.", 'InvalidStateError'), select));
+      }
       const activation = G.navigator.userActivation;
       if (!(activation && activation.isActive)) {
-        return Promise.reject(new DOMException("Failed to execute 'select' on 'ContactsManager': A user gesture is required to call this method.", 'SecurityError'));
+        return Promise.reject(strip(new DOMException("Failed to execute 'select' on 'ContactsManager': A user gesture is required to call this method.", 'SecurityError'), select));
       }
       return new Promise((resolve) => setTimeout(() => resolve([]), 800));
-    }}.select);
-    Object.defineProperty(proto, Symbol.toStringTag, {value: 'ContactsManager', configurable: true});
-    const manager = Object.create(proto);
+    }}.select;
+    fakeInterface(CM, 'ContactsManager', {getProperties, select});
+    const manager = Object.create(CM.prototype);
     const getter = Object.getOwnPropertyDescriptor({get contacts() { Reflect.apply(receiverCheck, this, []); return manager; }}, 'contacts').get;
     masks.set(getter, 'function get contacts() { [native code] }');
     Object.defineProperty(N, 'contacts', {get: getter, enumerable: true, configurable: true});
-    Object.defineProperty(G, 'ContactsManager', {value: CM, writable: true, enumerable: false, configurable: true});
-  }
-  // 条码识别：安卓与 Mac 版 Chrome 有，Linux 版没有。宿主没有时补上：支持安卓的格式，识别结果为空（看不到条码）
-  if (!G.BarcodeDetector && G.isSecureContext) {
-    const formats = ['aztec', 'code_128', 'code_39', 'code_93', 'codabar', 'data_matrix', 'ean_13', 'ean_8', 'itf', 'pdf417', 'qr_code', 'upc_a', 'upc_e'];
-    const BD = function BarcodeDetector(options) {
-      if (new.target === undefined) throw new TypeError("Failed to construct 'BarcodeDetector': Please use the 'new' operator, this DOM object constructor cannot be called as a function.");
-      const wanted = options && options.formats;
-      if (wanted !== undefined && (!wanted.length || wanted.some(f => !formats.includes(f)))) {
-        throw new TypeError("Failed to construct 'BarcodeDetector': Hint option provided, but is empty or contains an unknown format.");
-      }
-    };
-    masks.set(BD, 'function BarcodeDetector() { [native code] }');
-    const getSupportedFormats = {getSupportedFormats() { return Promise.resolve(formats.slice()); }}.getSupportedFormats;
-    masks.set(getSupportedFormats, 'function getSupportedFormats() { [native code] }');
-    Object.defineProperty(BD, 'getSupportedFormats', {value: getSupportedFormats, writable: true, enumerable: true, configurable: true});
-    const detect = {detect(image) {
-      if (!(this instanceof BD)) return Promise.reject(new TypeError('Illegal invocation'));
-      return Promise.resolve([]);
-    }}.detect;
-    masks.set(detect, 'function detect() { [native code] }');
-    Object.defineProperty(BD.prototype, 'detect', {value: detect, writable: true, enumerable: true, configurable: true});
-    Object.defineProperty(BD.prototype, Symbol.toStringTag, {value: 'BarcodeDetector', configurable: true});
-    Object.defineProperty(G, 'BarcodeDetector', {value: BD, writable: true, enumerable: false, configurable: true});
   }
   // 电池：放电中、电量按账号固定；时间未知时为 Infinity（与真机一致）
   if (G.BatteryManager) {
