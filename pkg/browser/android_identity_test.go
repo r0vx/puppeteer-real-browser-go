@@ -99,7 +99,7 @@ func TestMobileUserAgentFileStaysDesktop(t *testing.T) {
 	}
 }
 
-// TestFingerprintForOptionsMobile Mobile 只对新账号生效；与已有文件类型不一致时报错且不改文件（Review Focus 2）；iOS 尚不支持
+// TestFingerprintForOptionsMobile Mobile 只对新账号生效；与已有文件类型不一致时报错且不改文件（Review Focus 2）；iPhone UA 生成 iOS 身份
 func TestFingerprintForOptionsMobile(t *testing.T) {
 	dir := t.TempDir()
 	cfg, err := fingerprintForOptions(&ConnectOptions{FingerprintUserID: "m1", FingerprintDir: dir, Mobile: true, UserAgent: androidTestUA, Width: 1920, Height: 1080})
@@ -134,11 +134,23 @@ func TestFingerprintForOptionsMobile(t *testing.T) {
 			}
 		})
 	}
-	if _, err := fingerprintForOptions(&ConnectOptions{FingerprintUserID: "i1", FingerprintDir: dir, Mobile: true, UserAgent: iphoneTestUA}); err == nil || !strings.Contains(err.Error(), "iOS") {
-		t.Errorf("iOS mobile account: err = %v", err)
+	ios, err := fingerprintForOptions(&ConnectOptions{FingerprintUserID: "i1", FingerprintDir: dir, Mobile: true, UserAgent: iphoneTestUA})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "i1.json")); err == nil {
-		t.Error("a file was written for the rejected iOS account")
+	if ios.Device == nil || ios.Device.Kind != deviceKindIOS || ios.Browser.Platform != iosPlatform {
+		t.Fatalf("new iOS account has device %+v / platform %q", ios.Device, ios.Browser.Platform)
+	}
+	// 再次加载（新的管理器读文件）：认识 ios 类型；不带 Mobile 时报错且不改文件
+	if _, err := fingerprintForOptions(&ConnectOptions{FingerprintUserID: "i1", FingerprintDir: dir, Mobile: true}); err != nil {
+		t.Errorf("reload iOS account: %v", err)
+	}
+	iosBefore, _ := os.ReadFile(filepath.Join(dir, "i1.json"))
+	if _, err := fingerprintForOptions(&ConnectOptions{FingerprintUserID: "i1", FingerprintDir: dir}); err == nil || !strings.Contains(err.Error(), "mobile identity") {
+		t.Errorf("iOS file without Mobile: err = %v", err)
+	}
+	if after, _ := os.ReadFile(filepath.Join(dir, "i1.json")); !bytes.Equal(iosBefore, after) {
+		t.Error("iOS fingerprint file changed")
 	}
 	var saved map[string]json.RawMessage
 	raw, _ := os.ReadFile(filepath.Join(dir, "m1.json"))

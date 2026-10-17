@@ -170,8 +170,12 @@ func geometryFor(os OSFamily, s screenSpec, platformVersion string) screenGeomet
 // configGeometry 账号指纹对应的屏幕与窗口几何（身份与无界面启动参数共用，保证两边一致）
 func configGeometry(cfg *FingerprintConfig) screenGeometry {
 	os := configOS(cfg)
-	if os == OSAndroid {
-		return androidGeometry(screenSpec{Width: cfg.Screen.Width, Height: cfg.Screen.Height, DPR: cfg.Screen.DevicePixelRatio})
+	s := screenSpec{Width: cfg.Screen.Width, Height: cfg.Screen.Height, DPR: cfg.Screen.DevicePixelRatio}
+	switch os {
+	case OSAndroid:
+		return androidGeometry(s)
+	case OSIOS:
+		return iosGeometry(s)
 	}
 	spec, _ := screenSpecFor(os, cfg.Screen.Width, cfg.Screen.Height, cfg.Screen.DevicePixelRatio)
 	return geometryFor(os, spec, cfg.Browser.PlatformVersion)
@@ -201,6 +205,8 @@ type Identity struct {
 	DeviceMemory        int     // navigator.deviceMemory；0 表示不改写（桌面身份沿用原生值）
 	Battery             float64 // 电池电量（安卓身份）；0 表示不改写
 	Metadata            uaMetadata
+	NoClientHints       bool // Safari 不发 Client Hints：UA 覆盖不带 userAgentMetadata，注入脚本删掉 userAgentData（iOS 身份）
+	NoWebGPU            bool // 没有 navigator.gpu（iOS 18.5）；false 表示保持原生
 	Screen              screenGeometry
 	GPU                 *gpuProfile // nil 表示不改写 WebGL
 	NoiseSeed           uint32      // 0 表示不加 canvas / 音频 / readPixels 噪声
@@ -226,8 +232,11 @@ func noiseSeed(userID string) uint32 {
 
 // identityFromConfig 由规范化后的账号指纹与真实浏览器派生身份：系统、屏幕、显卡等取自指纹，版本与品牌取自真实浏览器
 func identityFromConfig(cfg *FingerprintConfig, host hostInfo) (*Identity, error) {
-	if configOS(cfg) == OSAndroid {
+	switch configOS(cfg) {
+	case OSAndroid:
 		return androidIdentity(cfg, host)
+	case OSIOS:
+		return iosIdentity(cfg, host)
 	}
 	os := osFromUserAgent(cfg.Browser.UserAgent)
 	gpu, ok := lookupGPU(os, cfg.WebGL.Renderer)

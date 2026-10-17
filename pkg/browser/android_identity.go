@@ -140,8 +140,13 @@ func androidGeometry(s screenSpec) screenGeometry {
 
 // configOS 指纹声称的系统：有 device 段的按其类型（移动身份），否则按 UA 判定 Windows / macOS——老指纹永不变成移动身份
 func configOS(cfg *FingerprintConfig) OSFamily {
-	if cfg.Device != nil && cfg.Device.Kind == deviceKindAndroid {
-		return OSAndroid
+	if cfg.Device != nil {
+		switch cfg.Device.Kind {
+		case deviceKindAndroid:
+			return OSAndroid
+		case deviceKindIOS:
+			return OSIOS
+		}
 	}
 	return osFromUserAgent(cfg.Browser.UserAgent)
 }
@@ -227,7 +232,7 @@ func appendSwitchValue(flags []string, prefix, value string) []string {
 
 // knownDeviceKind 本版本认识的移动设备类型；更新的版本写的类型不能按桌面规范化回写，否则会毁掉那份指纹
 func knownDeviceKind(kind string) bool {
-	return kind == deviceKindAndroid
+	return kind == deviceKindAndroid || kind == deviceKindIOS
 }
 
 // deviceMismatch 账号指纹的设备类型与 ConnectOptions.Mobile 不一致时的错误（同一账号 ID 只能是一种设备）

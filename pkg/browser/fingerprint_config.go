@@ -67,8 +67,8 @@ type FingerprintConfig struct {
 
 // DeviceConfig 移动身份的设备
 type DeviceConfig struct {
-	Kind         string `json:"kind"`          // android（iOS 见子项目 M3）
-	Model        string `json:"model"`         // Client Hints 的 model，即机型代号
+	Kind         string `json:"kind"`          // android / ios
+	Model        string `json:"model"`         // 机型代号（安卓为 Client Hints 的 model，iOS 为档案代号）
 	DeviceMemory int    `json:"device_memory"` // navigator.deviceMemory
 }
 
@@ -619,16 +619,20 @@ func readFile(filepath string) ([]byte, error) {
 // fingerprintSchemaVersion 当前指纹格式：2 = 自洽的身份（Windows / macOS，或带 device 段的移动身份；UA 只用于判定系统，版本运行时跟随真实浏览器）
 const fingerprintSchemaVersion = 2
 
-// Normalize 把指纹规范化为自洽的身份（Windows / macOS，或有 device 段时的安卓），返回是否有改动（调用方据此回写文件）。
+// Normalize 把指纹规范化为自洽的身份（Windows / macOS，或有 device 段时的安卓 / iOS），返回是否有改动（调用方据此回写文件）。
 // 只修正身份相关字段，其余字段原样保留；对已规范化的配置幂等
 func (config *FingerprintConfig) Normalize() bool {
 	before, _ := json.Marshal(config)
 	osf := configOS(config)
 	seed := func(purpose string) uint64 { return identitySeed(config.UserID, purpose) }
+	mobile := osf == OSAndroid || osf == OSIOS
 
-	if osf == OSAndroid {
+	switch osf {
+	case OSAndroid:
 		normalizeAndroid(config, seed)
-	} else {
+	case OSIOS:
+		normalizeIOS(config, seed)
+	default:
 		major := uaMajorVersion(config.Browser.UserAgent)
 		if major == "" {
 			major = "120"
@@ -654,7 +658,7 @@ func (config *FingerprintConfig) Normalize() bool {
 		config.Timezone.Timezone, _ = getTimezoneForLanguage(config.Browser.Language)
 	}
 
-	if osf != OSAndroid {
+	if !mobile {
 		// 屏幕：不像该系统的真实设备时按用户 ID 重选；可用区域按系统规则重算
 		if !plausibleScreen(osf, config.Screen) {
 			s := pickWeighted(screensFor(osf), seed("screen"))
@@ -784,10 +788,13 @@ func generateFingerprintFor(userID string, osf OSFamily) *FingerprintConfig {
 		TLSConfig:    fg.generateTLSConfig(r),
 		HTTP2Config:  fg.generateHTTP2Config(r),
 	}
-	if osf == OSAndroid {
+	switch osf {
+	case OSAndroid:
 		c.Device = &DeviceConfig{Kind: deviceKindAndroid}
 		c.Browser.UserAgent = androidUserAgent("120")
-	} else {
+	case OSIOS:
+		c.Device = &DeviceConfig{Kind: deviceKindIOS} // UA 由 Normalize 按机型给出
+	default:
 		c.Browser.UserAgent = canonicalUserAgent(osf, "120")
 	}
 	c.Browser.Language = "zh-CN"

@@ -121,14 +121,14 @@ func (ufm *UserFingerprintManager) GetOrCreateUserFingerprint(userID string, ini
 		return config, nil
 	}
 
-	// 新账号：要求移动身份时生成安卓（iOS 见子项目 M3），否则系统由绑定的 UA 决定，未提供 UA 时为 Windows
+	// 新账号：要求移动身份时生成安卓，绑的是 iPhone / iPad UA 时生成 iOS（iPhone，表面级）；否则系统由绑定的 UA 决定，未提供 UA 时为 Windows
 	osFamily := OSWindows
 	switch {
 	case initParams != nil && initParams.Mobile:
-		if isIOSUserAgent(initParams.UserAgent) {
-			return nil, fmt.Errorf("fingerprint %s: iOS identities are not supported yet", userID)
-		}
 		osFamily = OSAndroid
+		if isIOSUserAgent(initParams.UserAgent) {
+			osFamily = OSIOS
+		}
 	case initParams != nil && initParams.UserAgent != "":
 		osFamily = osFromUserAgent(initParams.UserAgent)
 	}
