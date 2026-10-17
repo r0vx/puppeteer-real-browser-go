@@ -15,7 +15,13 @@ type jsIdentity struct {
 	WebGL               *jsWebGL   `json:"webgl,omitempty"`
 	Seed                uint32     `json:"seed"`
 	Android             *jsAndroid `json:"android,omitempty"`
+	IOS                 *jsIOS     `json:"ios,omitempty"`
 	Key                 string     `json:"key"` // 见 Identity.ScriptKey
+}
+
+// jsIOS iOS 身份专有：没有 navigator.gpu 的机型（iOS 18.5）
+type jsIOS struct {
+	NoWebGPU bool `json:"noWebGPU"`
 }
 
 // jsAndroid 安卓身份专有：内存与电量
@@ -94,6 +100,9 @@ func identityScript(id *Identity, worker bool) string {
 	if id.OS == OSAndroid {
 		cfg.Android = &jsAndroid{DeviceMemory: id.DeviceMemory, Battery: id.Battery}
 	}
+	if id.OS == OSIOS {
+		cfg.IOS = &jsIOS{NoWebGPU: id.NoWebGPU}
+	}
 	if id.GPU != nil {
 		w := &jsWebGL{Vendor: id.GPU.Vendor, Renderer: id.GPU.Renderer, Params: webglParams(id.GPU.Caps)}
 		if m := id.GPU.Mobile; m != nil {
@@ -132,9 +141,11 @@ for (const w of [G.parent, G.opener]) {
 }
 // 替换后的 toString 用方法写法：和原生一样不可 new、没有 prototype。不用 Proxy：Proxy 会被原型循环检查
 // （CreepJS 的 too much recursion / reflect set proto）和报错调用栈识破
+// iOS 身份：原生函数文本是 JavaScriptCore 的格式（function max() {\n    [native code]\n}），伪装表里的条目一并转换；页面自己的函数原样
+const jsc = (s) => C.ios && s.endsWith(' { [native code] }') ? s.slice(0, -18) + ' {\n    [native code]\n}' : s;
 const toStringProxy = {toString() {
   if (this === C.key) return masks;
-  return masks.has(this) ? masks.get(this) : Reflect.apply(nativeToString, this, []);
+  return jsc(masks.has(this) ? masks.get(this) : Reflect.apply(nativeToString, this, []));
 }}.toString;
 masks.set(toStringProxy, Reflect.apply(nativeToString, nativeToString, []));
 Object.defineProperty(Function.prototype, 'toString', {value: toStringProxy});
@@ -341,6 +352,46 @@ if (C.android) {
     fakeInterface(BD, 'BarcodeDetector', {detect});
   }
 }
+if (C.ios) {
+  // Safari 没有的接口（页面与 Worker）：Client Hints、内存、网络信息、电池、振动、硬件接口；navigator.gpu 只有 iOS 26 有
+  const navKeys = ['userAgentData', 'deviceMemory', 'connection', 'hid', 'serial', 'usb', 'bluetooth', 'keyboard', 'ink', 'scheduling',
+    'presentation', 'getInstalledRelatedApps', 'setAppBadge', 'clearAppBadge', 'virtualKeyboard', 'webkitTemporaryStorage',
+    'webkitPersistentStorage', 'xr', 'devicePosture', 'windowControlsOverlay', 'contacts', 'getBattery', 'vibrate'];
+  if (C.ios.noWebGPU) navKeys.push('gpu');
+  for (const N of [G.Navigator, G.WorkerNavigator]) if (N) for (const k of navKeys) delete N.prototype[k];
+  // ManagedMediaSource：iPhone 上没有 MediaSource，只有它（iOS 17.1 起）。由宿主的 MediaSource 实现，播放器照常可用；
+  // 编解码支持沿用宿主（谎报宿主解不了的格式会让网站推来放不了的视频）
+  if (G.MediaSource && G.document && !G.ManagedMediaSource) {
+    const MS = G.MediaSource;
+    const MMS = function ManagedMediaSource() {
+      if (new.target === undefined) throw strip(new TypeError('calling ManagedMediaSource constructor without new is invalid'), MMS);
+      return Reflect.construct(MS, [], new.target);
+    };
+    Object.setPrototypeOf(MMS.prototype, MS.prototype);
+    Object.setPrototypeOf(MMS, MS);
+    const streaming = Object.getOwnPropertyDescriptor({get streaming() {
+      if (!(this instanceof MMS)) throw strip(new TypeError('The ManagedMediaSource.streaming getter can only be used on instances of ManagedMediaSource'), streaming);
+      return true;
+    }}, 'streaming').get;
+    masks.set(streaming, 'function get streaming() { [native code] }');
+    Object.defineProperty(MMS.prototype, 'streaming', {get: streaming, enumerable: true, configurable: true});
+    fakeInterface(MMS, 'ManagedMediaSource', {});
+  }
+  for (const k of ['NavigatorUAData', 'Notification', 'BarcodeDetector', 'NetworkInformation', 'MediaSource', 'HID', 'HIDDevice', 'Serial',
+    'SerialPort', 'USB', 'USBDevice', 'Bluetooth', 'Keyboard', 'Scheduler', 'scheduler', 'BatteryManager', 'ContactsManager']) delete G[k];
+  if (C.ios.noWebGPU) for (const k of ['GPU', 'GPUAdapter', 'GPUDevice']) delete G[k];
+  for (const N of [G.Navigator, G.WorkerNavigator]) if (N && 'vendor' in N.prototype) patchGetter(N.prototype, 'vendor', () => 'Apple Computer, Inc.');
+  // 通知权限：Safari 网页（不是加到主屏幕的网页应用）为 denied（真机实测）
+  if (G.Permissions && G.PermissionStatus) {
+    const denied = new WeakSet();
+    patchMethod(Permissions.prototype, 'query', (orig, self, args) => {
+      const p = Reflect.apply(orig, self, args);
+      const d = args[0];
+      return d !== null && typeof d === 'object' && d.name === 'notifications' ? p.then(s => (denied.add(s), s)) : p;
+    });
+    patchGetter(PermissionStatus.prototype, 'state', (orig, self) => denied.has(self) ? 'denied' : Reflect.apply(orig, self, []));
+  }
+}
 `
 
 // jsWindowPart 页面 / iframe 专有部分：屏幕可用区域、iframe 中的屏幕与 DPR、受信鼠标事件的屏幕坐标、canvas 与音频噪声
@@ -409,8 +460,8 @@ if (C.seed && G.HTMLCanvasElement) {
   patchMethod(HTMLCanvasElement.prototype, 'toDataURL', (orig, self, args) => exportNoisy(self, orig, args));
   patchMethod(HTMLCanvasElement.prototype, 'toBlob', (orig, self, args) => exportNoisy(self, orig, args));
 }
-if (G.Navigator && G.isSecureContext && /^(Win32|MacIntel|Linux armv81)$/.test(C.platform) && !('share' in Navigator.prototype)) {
-  // Linux 版 Chrome 没有 Web Share，Windows / Mac / 安卓版有（CreepJS 的 noWebShare）：按真实 Chrome 的行为补上
+if (G.Navigator && G.isSecureContext && /^(Win32|MacIntel|Linux armv81|iPhone)$/.test(C.platform) && !('share' in Navigator.prototype)) {
+  // Linux 版 Chrome 没有 Web Share，Windows / Mac / 安卓版与 iPhone Safari 有（CreepJS 的 noWebShare）：按真实 Chrome 的行为补上
   const N = Navigator.prototype;
   const receiverCheck = Object.getOwnPropertyDescriptor(N, 'userAgent').get; // this 不是 Navigator 时和原生一样抛 Illegal invocation
   let allowed = G === G.top;
@@ -525,6 +576,70 @@ if (C.android) {
     patchGetter(B, 'chargingTime', () => Infinity);
     patchGetter(B, 'dischargingTime', () => Infinity);
     patchGetter(B, 'level', () => A.battery);
+  }
+}
+if (C.ios) {
+  // Chrome 与桌面独有的接口：iPhone Safari 没有
+  for (const k of ['chrome', 'launchQueue', 'showDirectoryPicker', 'showOpenFilePicker', 'showSaveFilePicker', 'webkitRequestFileSystem',
+    'webkitResolveLocalFileSystemURL', 'EyeDropper', 'documentPictureInPicture', 'queryLocalFonts', 'getScreenDetails', 'ScreenDetails',
+    'ScreenDetailed', 'CaptureController', 'CropTarget', 'RestrictionTarget', 'DocumentPictureInPicture', 'DocumentPictureInPictureEvent',
+    'FontData', 'IdleDetector', 'WindowControlsOverlay', 'WindowControlsOverlayGeometryChangeEvent', 'HIDConnectionEvent', 'HIDInputReportEvent']) delete G[k];
+  if (G.MediaDevices) for (const k of ['getDisplayMedia', 'setCaptureHandleConfig']) delete MediaDevices.prototype[k];
+  const N = Navigator.prototype;
+  const receiverCheck = Object.getOwnPropertyDescriptor(N, 'userAgent').get; // this 不是 Navigator 时和原生一样抛错
+  // navigator.standalone：Safari 独有，不是主屏幕网页应用时为 false
+  if (!('standalone' in N)) {
+    const get = Object.getOwnPropertyDescriptor({get standalone() { Reflect.apply(receiverCheck, this, []); return false; }}, 'standalone').get;
+    masks.set(get, 'function get standalone() { [native code] }');
+    Object.defineProperty(N, 'standalone', {get, enumerable: true, configurable: true});
+  }
+  // GestureEvent：Safari 的双指手势事件
+  if (!G.GestureEvent) {
+    const GE = function GestureEvent(type) {
+      if (new.target === undefined) throw strip(new TypeError('calling GestureEvent constructor without new is invalid'), GE);
+      return Reflect.construct(UIEvent, arguments, new.target);
+    };
+    Object.setPrototypeOf(GE.prototype, UIEvent.prototype);
+    Object.setPrototypeOf(GE, UIEvent);
+    fakeInterface(GE, 'GestureEvent', {});
+  }
+  // ApplePaySession：iPhone 都支持 Apple Pay（canMakePayments 不检查绑卡，为 true）；不安全的页面里调用会报错
+  if (!G.ApplePaySession) {
+    const insecure = () => new DOMException('Trying to call an ApplePaySession API from an insecure document.', 'InvalidAccessError');
+    const AP = function ApplePaySession(version, request) {
+      if (new.target === undefined) throw strip(new TypeError('calling ApplePaySession constructor without new is invalid'), AP);
+      if (arguments.length < 2) throw strip(new TypeError('Not enough arguments'), AP);
+      throw strip(G.isSecureContext ? new DOMException('Must create a new ApplePaySession from a user gesture handler.', 'InvalidAccessError') : insecure(), AP);
+    };
+    const statics = {
+      canMakePayments() {
+        if (!G.isSecureContext) throw strip(insecure(), statics.canMakePayments);
+        return true;
+      },
+      canMakePaymentsWithActiveCard(merchantIdentifier) {
+        return G.isSecureContext ? Promise.resolve(false) : Promise.reject(insecure());
+      },
+      supportsVersion(version) {
+        if (!G.isSecureContext) throw strip(insecure(), statics.supportsVersion);
+        return Number(version) >= 1 && Number(version) <= 14;
+      },
+    };
+    for (const [k, fn] of Object.entries(statics)) {
+      masks.set(fn, 'function ' + k + '() { [native code] }');
+      Object.defineProperty(AP, k, {value: fn, writable: true, enumerable: true, configurable: true});
+    }
+    Object.setPrototypeOf(AP.prototype, EventTarget.prototype);
+    Object.setPrototypeOf(AP, EventTarget);
+    fakeInterface(AP, 'ApplePaySession', {});
+  }
+  // openDatabase：iPhone 上 WebSQL 的入口还在（两台真机都有）；不实现数据库，调用时报 SecurityError（Safari 禁用 WebSQL 时的表现）
+  if (!('openDatabase' in G)) {
+    const openDatabase = {openDatabase(name, version, displayName, estimatedSize) {
+      if (arguments.length < 4) throw strip(new TypeError('Not enough arguments'), openDatabase);
+      throw strip(new DOMException('The operation is insecure.', 'SecurityError'), openDatabase);
+    }}.openDatabase;
+    masks.set(openDatabase, 'function openDatabase() { [native code] }');
+    Object.defineProperty(G, 'openDatabase', {value: openDatabase, writable: true, enumerable: true, configurable: true});
   }
 }
 `

@@ -60,9 +60,9 @@ func TestIOSIdentityAcrossSurfaces(t *testing.T) {
 			t.Errorf("%s never reported", surface)
 			continue
 		}
-		want := map[string]any{"ua": ua, "platform": "iPhone", "cores": 4.0, "languages": "zh-CN"}
+		want := map[string]any{"ua": ua, "platform": "iPhone", "cores": 4.0, "languages": "zh-CN", "uad": false, "native": "function max() {\n    [native code]\n}"}
 		if surface != "worker" {
-			want["touch"], want["coarse"], want["p3"], want["screen"] = 5.0, true, true, "420,912,3"
+			want["touch"], want["coarse"], want["p3"], want["screen"], want["vendor"] = 5.0, true, true, "420,912,3", "Apple Computer, Inc."
 		}
 		for k, v := range want {
 			if info[k] != v {
@@ -104,5 +104,98 @@ func TestIOSLaunchAndViewport(t *testing.T) {
 	}
 	if got, _ := p.Evaluate(js); got != "5,2,true,440,956,440,956,440,956,3,portrait-primary,true" {
 		t.Errorf("after SetViewport(1920, 1080) %v", got)
+	}
+}
+
+// iosAPIsJS iPhone Safari 与 Chrome 不同的 JS 接口
+const iosAPIsJS = `(async () => {
+  const has = (o, ks) => ks.filter(k => k in o);
+  const mms = new ManagedMediaSource();
+  const v = document.createElement('video');
+  const opened = await new Promise(r => { mms.addEventListener('sourceopen', () => r(true)); v.src = URL.createObjectURL(mms); setTimeout(() => r(false), 3000); });
+  let sb; try { sb = String(mms.addSourceBuffer('video/mp4; codecs="avc1.42E01E"')); } catch (e) { sb = e.name; }
+  let ap; try { ap = ApplePaySession.canMakePayments(); } catch (e) { ap = e.name; }
+  let db; try { openDatabase('a', '1', 'a', 1); db = 'opened'; } catch (e) { db = e.name; }
+  const worker = await new Promise(r => {
+    const src = "postMessage(['userAgentData' in navigator, 'deviceMemory' in navigator, typeof MediaSource, typeof Notification, Function.prototype.toString.call(Math.max)].join('|'))";
+    const w = new Worker(URL.createObjectURL(new Blob([src], {type: 'text/javascript'})));
+    w.onmessage = e => r(e.data);
+  });
+  return JSON.stringify({
+    vendor: navigator.vendor, standalone: navigator.standalone, standaloneIn: 'standalone' in navigator,
+    removedNav: has(navigator, ['userAgentData', 'deviceMemory', 'connection', 'bluetooth', 'getBattery', 'vibrate', 'usb', 'serial', 'hid', 'keyboard', 'xr', 'contacts', 'virtualKeyboard']),
+    removedWin: has(window, ['chrome', 'Notification', 'MediaSource', 'BarcodeDetector', 'NavigatorUAData', 'NetworkInformation', 'showOpenFilePicker',
+      'webkitRequestFileSystem', 'EyeDropper', 'launchQueue', 'queryLocalFonts', 'getScreenDetails']),
+    present: ['ApplePaySession', 'GestureEvent', 'ManagedMediaSource', 'openDatabase', 'SharedWorker'].filter(k => k in window).join(),
+    gesture: Object.getPrototypeOf(GestureEvent.prototype) === UIEvent.prototype,
+    mms: mms instanceof ManagedMediaSource && mms.streaming === true, opened, sb,
+    applePay: ap, db, dbLength: openDatabase.length, perm: (await navigator.permissions.query({name: 'notifications'})).state,
+    geo: (await navigator.permissions.query({name: 'geolocation'})).state,
+    patched: Function.prototype.toString.call(Object.getOwnPropertyDescriptor(Navigator.prototype, 'vendor').get),
+    fake: Function.prototype.toString.call(ApplePaySession),
+    user: Function.prototype.toString.call(function f() { return 1; }),
+    share: typeof navigator.share, gpu: 'gpu' in navigator, worker,
+  });
+})()`
+
+// TestIOSSurfaceAPIs iOS 身份的 JS 接口与 iPhone 一致：Chrome 独有的删掉，Safari 独有的补上，原生函数文本是 JavaScriptCore 格式；
+// 删掉 MediaSource 后播放器仍能用 ManagedMediaSource（Review Focus 4）；桌面身份不受影响（Review Focus 3）
+func TestIOSSurfaceAPIs(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, `<title>plain</title>`) }))
+	defer srv.Close()
+	t.Run("ios", func(t *testing.T) {
+		p := connectIOS(t, "ios-apis", "iphone-ios18.5").Page()
+		if err := p.Navigate(srv.URL); err != nil {
+			t.Fatal(err)
+		}
+		got := map[string]any{}
+		if err := json.Unmarshal([]byte(awaitJS(t, p, iosAPIsJS)), &got); err != nil {
+			t.Fatal(err)
+		}
+		want := map[string]any{
+			"vendor": "Apple Computer, Inc.", "standalone": false, "standaloneIn": true,
+			"present": "ApplePaySession,GestureEvent,ManagedMediaSource,openDatabase,SharedWorker", "gesture": true,
+			"mms": true, "opened": true, "sb": "[object SourceBuffer]", "applePay": true, "db": "SecurityError", "dbLength": 4.0,
+			"perm": "denied", "geo": "prompt",
+			"patched": "function get vendor() {\n    [native code]\n}", "fake": "function ApplePaySession() {\n    [native code]\n}",
+			"user": "function f() { return 1; }", "share": "function", "gpu": false,
+			"worker": "false|false|undefined|undefined|function max() {\n    [native code]\n}",
+		}
+		for k, v := range want {
+			if got[k] != v {
+				t.Errorf("%s = %v, want %v", k, got[k], v)
+			}
+		}
+		for _, k := range []string{"removedNav", "removedWin"} {
+			if r, _ := got[k].([]any); len(r) != 0 {
+				t.Errorf("%s: Chrome-only APIs still present: %v", k, r)
+			}
+		}
+	})
+	t.Run("desktop", func(t *testing.T) {
+		inst, err := Connect(t.Context(), &ConnectOptions{Headless: true, FingerprintUserID: "desktop-ios-apis", FingerprintDir: t.TempDir()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer inst.Close()
+		p := inst.Page()
+		if err := p.Navigate(srv.URL); err != nil {
+			t.Fatal(err)
+		}
+		const js = `[navigator.vendor, typeof Notification, 'userAgentData' in navigator, typeof ApplePaySession, Function.prototype.toString.call(Math.max)].join('|')`
+		if got, _ := p.Evaluate(js); got != "Google Inc.|function|true|undefined|function max() { [native code] }" {
+			t.Errorf("desktop identity changed: %v", got)
+		}
+	})
+}
+
+// TestIOSWebGL WebGL1 / WebGL2 的标识、版本串、能力参数、精度、扩展列表与 iPhone 一致
+func TestIOSWebGL(t *testing.T) {
+	srv, _ := baselineServer(t, "", http.StatusOK)
+	got, want := collectOn(t, connectIOS(t, "ios-webgl", "iphone-ios26").Page(), srv), loadIOSBaseline(t, "ios-safari-iphone-2.json")
+	for _, kind := range []string{"webgl", "webgl2"} {
+		for _, d := range diffBaseline(want[kind], got[kind], kind, func(string) bool { return false }) {
+			t.Error(d)
+		}
 	}
 }
