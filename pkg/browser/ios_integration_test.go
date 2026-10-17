@@ -3,8 +3,10 @@ package browser
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -197,5 +199,130 @@ func TestIOSWebGL(t *testing.T) {
 		for _, d := range diffBaseline(want[kind], got[kind], kind, func(string) bool { return false }) {
 			t.Error(d)
 		}
+	}
+}
+
+// TestIOSTapAndTypeMatchBaseline 在采集页上点按钮、输入 ab1，与 iPhone（iOS 26）的事件序列与属性比较（Review Focus 5）
+func TestIOSTapAndTypeMatchBaseline(t *testing.T) {
+	srv, posted := baselineServer(t, "", http.StatusOK)
+	p := connectIOS(t, "ios-input", "iphone-ios26").Page()
+	sp := p.(*CustomCDPPage)
+	collectOn(t, p, srv)
+	if err := sp.ClickSelector("#tap-btn"); err != nil {
+		t.Fatal(err)
+	}
+	if err := sp.SendKeys("#type-input", "ab1"); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(300 * time.Millisecond)
+	if v, _ := p.Evaluate(`document.getElementById('type-input').value`); v != "ab1" {
+		t.Errorf("input value %v, want ab1", v)
+	}
+	if _, err := p.Evaluate(`window.finishBaseline(), true`); err != nil {
+		t.Fatal(err)
+	}
+	var body struct {
+		Interaction struct {
+			Events []map[string]any `json:"events"`
+		} `json:"interaction"`
+	}
+	select {
+	case raw := <-posted:
+		if err := json.Unmarshal(raw, &body); err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("nothing posted")
+	}
+	got, want := body.Interaction.Events, baselineInteraction(t, "ios-safari-iphone-2.json")
+	if g, w := tapSequence(got, "tap"), tapSequence(want, "tap"); !slices.Equal(g, w) {
+		t.Errorf("tap sequence\n %v\nwant\n %v", g, w)
+	}
+	down, up, click := firstOf(got, "tap", "pointerdown"), firstOf(got, "tap", "pointerup"), firstOf(got, "tap", "click")
+	if down == nil || up == nil || click == nil {
+		t.Fatalf("tap incomplete: down %v up %v click %v", down, up, click)
+	}
+	if down["pointerType"] != "touch" || down["pressure"] != 0.0 || math.Abs(down["width"].(float64)-24.16) > 0.01 || down["isPrimary"] != true {
+		t.Errorf("pointerdown %v", down)
+	}
+	if up["pressure"] != 0.0 || click["pointerType"] != "mouse" || click["width"] != 1.0 {
+		t.Errorf("pointerup %v / click %v", up, click)
+	}
+	// Safari 的屏幕坐标与页面坐标相同
+	for _, e := range []map[string]any{down, up, click, firstOf(got, "tap", "mousedown")} {
+		if e != nil && e["screenY"] != e["clientY"] {
+			t.Errorf("%s screenY %v, clientY %v", e["type"], e["screenY"], e["clientY"])
+		}
+	}
+	if hold := up["rt"].(float64) - down["rt"].(float64); hold < 20 || hold > 110 {
+		t.Errorf("finger held %.0fms, want 20–110ms (iPhone about 28ms)", hold)
+	}
+	// 按键字段与真机一致：keydown 为 229，keyup 为按键码
+	var keys, updates []string
+	for _, e := range got {
+		if e["step"] != "type" {
+			continue
+		}
+		switch e["type"] {
+		case "keydown", "keyup":
+			keys = append(keys, fmt.Sprintf("%v:%v:%v:%v", e["type"], e["key"], e["code"], e["keyCode"]))
+		case "compositionupdate":
+			if d := fmt.Sprint(e["data"]); len(updates) == 0 || updates[len(updates)-1] != d {
+				updates = append(updates, d)
+			}
+		}
+	}
+	if w := "keydown:a:KeyA:229,keyup:a:KeyA:65,keydown:b:KeyB:229,keyup:b:KeyB:66,keydown:1:Digit1:229,keyup:1:Digit1:49"; strings.Join(keys, ",") != w {
+		t.Errorf("keys\n %s\nwant\n %s", strings.Join(keys, ","), w)
+	}
+	if strings.Join(updates, ",") != "a,ab,ab1" {
+		t.Errorf("composition updates %v, want a,ab,ab1", updates)
+	}
+}
+
+// TestIOSEnterKey 回车是 iOS 键盘的 Enter 键（code Enter、keyCode 13），产生换行；打字之后照样能点按（Review Focus 5）
+func TestIOSEnterKey(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, enterPage) }))
+	defer srv.Close()
+	p := connectIOS(t, "ios-enter", "iphone-ios26").Page()
+	sp := p.(*CustomCDPPage)
+	if err := p.Navigate(srv.URL); err != nil {
+		t.Fatal(err)
+	}
+	if err := sp.SendKeys("#i", "x\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := sp.ClickSelector("#i"); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := p.Evaluate(`window.__k.join(',')`)
+	got := fmt.Sprint(raw)
+	for _, want := range []string{"keydown|x|KeyX|229|", "keyup|x|KeyX|88|", "keydown|Enter|Enter|13|", "beforeinput|||0|insertLineBreak", "keyup|Enter|Enter|13|"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("events %s lack %s", got, want)
+		}
+	}
+	if v, _ := p.Evaluate(`document.getElementById('i').value`); v != "x" {
+		t.Errorf("input value %v, want x", v)
+	}
+}
+
+// TestIOSSwipeScrolls iOS 上 RealScroll 同样是手指拖动，滚动距离接近请求值；触点的屏幕坐标与页面坐标相同
+func TestIOSSwipeScrolls(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, swipePage) }))
+	defer srv.Close()
+	p := connectIOS(t, "ios-swipe", "iphone-ios26").Page()
+	if err := p.Navigate(srv.URL); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.(*CustomCDPPage).RealScroll(0, 900); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(500 * time.Millisecond)
+	if y, _ := p.Evaluate(`scrollY`); y.(float64) < 900-30 || y.(float64) > 900+30 {
+		t.Errorf("scrollY = %v after RealScroll(0, 900), want 900 ± 30", y)
+	}
+	if off, _ := p.Evaluate(`window.__touchOff`); off != 0.0 {
+		t.Errorf("Touch screenY - clientY = %v, want 0", off)
 	}
 }

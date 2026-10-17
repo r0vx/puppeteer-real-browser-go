@@ -410,8 +410,9 @@ if (G.MouseEvent && G === G.top) {
   patchGetter(MouseEvent.prototype, 'screenX', (orig, self) => self.isTrusted ? self.clientX + G.screenX + uiX() : Reflect.apply(orig, self, []));
   patchGetter(MouseEvent.prototype, 'screenY', (orig, self) => self.isTrusted ? self.clientY + G.screenY + uiY() : Reflect.apply(orig, self, []));
 }
-// 手机：浏览器产生的触点（Touch）的屏幕坐标同样从视口顶端算起；页面自己 new Touch() 构造的触点保持原值
-if (G.Touch && G === G.top && C.screen && C.screen.top) {
+// 手机：浏览器产生的触点（Touch）的屏幕坐标同样从视口顶端算起（iPhone 的视口顶端即屏幕顶端，偏移为 0）；页面自己 new Touch() 构造的触点保持原值
+if (G.Touch && G === G.top && C.screen && (C.screen.top || C.ios)) {
+  const top = C.screen.top || 0;
   const made = new WeakSet();
   const OrigTouch = G.Touch;
   const FakeTouch = function Touch(init) {
@@ -433,7 +434,7 @@ if (G.Touch && G === G.top && C.screen && C.screen.top) {
   disguise(FakeTouch, OrigTouch);
   Object.defineProperty(G, 'Touch', {value: FakeTouch, writable: true, enumerable: false, configurable: true});
   patchGetter(OrigTouch.prototype, 'screenX', (orig, self) => made.has(self) ? Reflect.apply(orig, self, []) : self.clientX);
-  patchGetter(OrigTouch.prototype, 'screenY', (orig, self) => made.has(self) ? Reflect.apply(orig, self, []) : self.clientY + C.screen.top);
+  patchGetter(OrigTouch.prototype, 'screenY', (orig, self) => made.has(self) ? Reflect.apply(orig, self, []) : self.clientY + top);
 }
 if (C.seed && G.HTMLCanvasElement) {
   const createElement = Document.prototype.createElement;
@@ -641,6 +642,8 @@ if (C.ios) {
     masks.set(openDatabase, 'function openDatabase() { [native code] }');
     Object.defineProperty(G, 'openDatabase', {value: openDatabase, writable: true, enumerable: true, configurable: true});
   }
+  // 点按产生的 click 在 Safari 上 pointerType 为 mouse（Chrome 为 touch，真机实测）
+  if (G.PointerEvent) patchGetter(PointerEvent.prototype, 'pointerType', (orig, self) => self.isTrusted && self.type === 'click' ? 'mouse' : Reflect.apply(orig, self, []));
 }
 `
 

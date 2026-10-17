@@ -39,10 +39,10 @@ func firstOf(events []map[string]any, step, typ string) map[string]any {
 	return nil
 }
 
-// baselineInteraction 读取安卓真机基准的交互记录
-func baselineInteraction(t *testing.T) []map[string]any {
+// baselineInteraction 读取真机基准（test/baseline/ 下的文件）的交互记录
+func baselineInteraction(t *testing.T, file string) []map[string]any {
 	t.Helper()
-	raw, err := os.ReadFile("../../test/baseline/android-chrome-pgkm10.json")
+	raw, err := os.ReadFile("../../test/baseline/" + file)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestAndroidTapAndTypeMatchBaseline(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("nothing posted")
 	}
-	got, want := body.Interaction.Events, baselineInteraction(t)
+	got, want := body.Interaction.Events, baselineInteraction(t, "android-chrome-pgkm10.json")
 
 	// RealHover 在第一次点按之前调用：在那之前不能有任何指针事件
 	for _, e := range got {

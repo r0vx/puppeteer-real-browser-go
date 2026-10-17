@@ -1,10 +1,12 @@
 package browser
 
 import (
+	"fmt"
 	"math"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // sentCDP 发出的一条 CDP 命令
@@ -38,7 +40,7 @@ func touchPointOf(c sentCDP) map[string]any {
 // TestMobileTapSequence 一次点按：按下、两次接触面变大、抬起；同一个点，坐标在目标 ±1.5 像素内、精度 1/24 像素
 func TestMobileTapSequence(t *testing.T) {
 	send, log := recordCDP()
-	if err := mobileTap(send, 100, 200); err != nil {
+	if err := mobileTap(send, OSAndroid, 100, 200); err != nil {
 		t.Fatal(err)
 	}
 	var types []string
@@ -78,7 +80,7 @@ func imeKeyOK(c sentCDP, typ string) bool {
 // TestMobileTypeSequence 组字输入：每个字 keydown(229) → 组字为当前整个词 → keyup(229)，最后提交整个词
 func TestMobileTypeSequence(t *testing.T) {
 	send, log := recordCDP()
-	if err := mobileType(send, "ab1"); err != nil {
+	if err := mobileType(send, OSAndroid, "ab1"); err != nil {
 		t.Fatal(err)
 	}
 	l := *log
@@ -102,7 +104,7 @@ func TestMobileTypeSequence(t *testing.T) {
 // TestMobileTypeSpaceAndEnter 空格与换行先提交当前词；空格直接提交，换行是真机那样的 Enter 键
 func TestMobileTypeSpaceAndEnter(t *testing.T) {
 	send, log := recordCDP()
-	if err := mobileType(send, "a b\n"); err != nil {
+	if err := mobileType(send, OSAndroid, "a b\n"); err != nil {
 		t.Fatal(err)
 	}
 	var got []string
@@ -132,7 +134,7 @@ func TestMobileTypeSpaceAndEnter(t *testing.T) {
 // 每次多拖一个触摸阈值（浏览器在手指移过阈值之后才开始滚动），所以总拖动距离为请求值加上每次的阈值
 func TestMobileScrollSplits(t *testing.T) {
 	send, log := recordCDP()
-	if err := mobileScroll(send, 400, 800, 0, 1000); err != nil {
+	if err := mobileScroll(send, OSAndroid, 400, 800, 0, 1000); err != nil {
 		t.Fatal(err)
 	}
 	var starts int
@@ -162,7 +164,7 @@ func TestMobileScrollSplits(t *testing.T) {
 func TestMobileTypeControlChars(t *testing.T) {
 	summary := func(text string) (string, error) {
 		send, log := recordCDP()
-		err := mobileType(send, text)
+		err := mobileType(send, OSAndroid, text)
 		var got []string
 		for _, c := range *log {
 			switch c.Method {
@@ -189,5 +191,46 @@ func TestMobileTypeControlChars(t *testing.T) {
 	}
 	if _, err := summary("x\ty"); err == nil || !strings.Contains(err.Error(), "U+0009") {
 		t.Errorf("tab: err = %v, want an unsupported control character error", err)
+	}
+}
+
+// TestIOSTapSequence iOS 点按：按下后直接抬起，中间没有移动；触点半径 12.08、force 0（pointer 宽高 24.16、pressure 0），按住 25–60ms
+func TestIOSTapSequence(t *testing.T) {
+	send, log := recordCDP()
+	start := time.Now()
+	if err := mobileTap(send, OSIOS, 100, 200); err != nil {
+		t.Fatal(err)
+	}
+	if d := time.Since(start); d < 25*time.Millisecond || d > 80*time.Millisecond {
+		t.Errorf("tap took %v, want 25–60ms", d)
+	}
+	var types []string
+	for _, c := range *log {
+		types = append(types, c.Params["type"].(string))
+	}
+	if strings.Join(types, ",") != "touchStart,touchEnd" {
+		t.Fatalf("touch types %v", types)
+	}
+	if p := touchPointOf((*log)[0]); p["radiusX"] != iosTouchRadius || p["radiusY"] != iosTouchRadius || p["force"] != 0.0 {
+		t.Errorf("touch point %v", p)
+	}
+}
+
+// TestIOSTypeKeys iOS 键盘：按键带真实的 key 与 code，keydown 的 keyCode 为 229、keyup 的为按键码；空格同样，回车的 code 为 Enter
+func TestIOSTypeKeys(t *testing.T) {
+	send, log := recordCDP()
+	if err := mobileType(send, OSIOS, "aB1 \n"); err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, c := range *log {
+		if c.Method == "Input.dispatchKeyEvent" {
+			got = append(got, fmt.Sprintf("%s:%s:%s:%v", c.Params["type"], c.Params["key"], c.Params["code"], c.Params["windowsVirtualKeyCode"]))
+		}
+	}
+	want := "rawKeyDown:a:KeyA:229,keyUp:a:KeyA:65,rawKeyDown:B:KeyB:229,keyUp:B:KeyB:66,rawKeyDown:1:Digit1:229,keyUp:1:Digit1:49," +
+		"rawKeyDown: :Space:229,keyUp: :Space:32,keyDown:Enter:Enter:13,keyUp:Enter:Enter:13"
+	if strings.Join(got, ",") != want {
+		t.Errorf("keys\n %s\nwant\n %s", strings.Join(got, ","), want)
 	}
 }

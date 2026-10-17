@@ -591,7 +591,7 @@ func (p *CustomCDPPage) mobileSend() cdpSend {
 // Click 移到 (x, y) 后点击（不走拟人轨迹）；坐标对齐设备像素；手机身份为手指点按
 func (p *CustomCDPPage) Click(x, y float64) error {
 	if send := p.mobileSend(); send != nil {
-		return mobileTap(send, x, y) // 手机：手指点按（没有鼠标轨迹）
+		return mobileTap(send, p.identity.OS, x, y) // 手机：手指点按（没有鼠标轨迹）
 	}
 	return p.client.Click(snapPoint(p.identity, x, y))
 }
@@ -600,7 +600,7 @@ func (p *CustomCDPPage) Click(x, y float64) error {
 // 使用贝塞尔曲线进行拟人化鼠标移动后点击
 func (p *CustomCDPPage) RealClick(x, y float64) error {
 	if send := p.mobileSend(); send != nil {
-		return mobileTap(send, x, y) // 手机：手指点按（没有鼠标轨迹）
+		return mobileTap(send, p.identity.OS, x, y) // 手机：手指点按（没有鼠标轨迹）
 	}
 	trajectory := p.getCursor().GenerateTrajectory(x, y)
 	x, y = snapPoint(p.identity, x, y)
@@ -656,7 +656,7 @@ func (p *CustomCDPPage) RealHover(x, y float64) error {
 func (p *CustomCDPPage) RealScroll(deltaX, deltaY float64) error {
 	if send := p.mobileSend(); send != nil {
 		s := p.identity.Screen
-		return mobileScroll(send, s.InnerWidth, s.InnerHeight, deltaX, deltaY) // 手机：手指拖动
+		return mobileScroll(send, p.identity.OS, s.InnerWidth, s.InnerHeight, deltaX, deltaY) // 手机：手指拖动
 	}
 	steps := wheelSteps(deltaX, deltaY)
 	for i, s := range steps {
@@ -776,7 +776,7 @@ func (p *CustomCDPPage) RealClickSelector(selector string) error {
 // RealSendKeys 向当前焦点元素逐键输入：桌面为真实按键（key / code / keyCode 齐全），手机为输入法组字，见 Type 与 mobileType
 func (p *CustomCDPPage) RealSendKeys(text string) error {
 	if send := p.mobileSend(); send != nil {
-		return mobileType(send, text)
+		return mobileType(send, p.identity.OS, text)
 	}
 	return p.client.Type(text)
 }
