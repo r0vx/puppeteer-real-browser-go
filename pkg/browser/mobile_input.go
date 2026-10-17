@@ -48,6 +48,9 @@ func touchEvent(typ string, x, y, radius float64) map[string]any {
 func mobileTap(send cdpSend, x, y float64) error {
 	x, y = fingerJitter(x), fingerJitter(y)
 	waits := []time.Duration{between(30, 60), between(30, 50), between(18, 30)}
+	// 按绝对时间排期，起点为按下事件被浏览器确认之时（此时 pointerdown 已发出）：
+	// 每次发送都要等确认，慢机器上逐条睡眠会把按住时长拉长，从发送前算起又会缩短
+	var due time.Time
 	for i, r := range tapRadii {
 		typ, px, py := "touchMove", x+float64(1+rand.Intn(2))/24, y
 		if i == 0 {
@@ -56,12 +59,16 @@ func mobileTap(send cdpSend, x, y float64) error {
 		if err := send("Input.dispatchTouchEvent", touchEvent(typ, px, py, r)); err != nil {
 			return err
 		}
-		time.Sleep(waits[i])
+		if i == 0 {
+			due = time.Now()
+		}
+		due = due.Add(waits[i])
+		time.Sleep(time.Until(due))
 	}
 	return send("Input.dispatchTouchEvent", touchEvent("touchEnd", x, y, 0))
 }
 
-// mobileSwipe 一次手指拖动：每 16ms 一个 touchMove，按缓出曲线从 (x0, y0) 移到 (x1, y1)；
+// mobileSwipe 一次手指拖动：每 16ms 一个 touchMove，按先加速后减速的曲线从 (x0, y0) 移到 (x1, y1)；
 // 到达后停住再抬起——浏览器按抬起前约 100ms 内的速度决定惯性滚动，停住就不会甩出去，滚动距离接近拖动距离
 func mobileSwipe(send cdpSend, x0, y0, x1, y1 float64) error {
 	if err := send("Input.dispatchTouchEvent", touchEvent("touchStart", subPixel(x0), subPixel(y0), tapRadii[0])); err != nil {
@@ -75,7 +82,10 @@ func mobileSwipe(send cdpSend, x0, y0, x1, y1 float64) error {
 	errs := make(chan error, steps)
 	for i := 1; i <= steps; i++ {
 		time.Sleep(time.Until(start.Add(time.Duration(i) * 16 * time.Millisecond)))
-		e := 1 - math.Pow(1-float64(i)/float64(steps), 3)
+		// 先加速后减速（smoothstep）：起步的位移小，跨过触摸阈值时是连续的小步；
+		// 起步一下跨出几十像素时，负载高的浏览器把它与后续移动合并，这次拖动会少滚一截
+		f := float64(i) / float64(steps)
+		e := f * f * (3 - 2*f)
 		move := touchEvent("touchMove", subPixel(x0+(x1-x0)*e), subPixel(y0+(y1-y0)*e), tapRadii[2])
 		wg.Go(func() {
 			if err := send("Input.dispatchTouchEvent", move); err != nil {

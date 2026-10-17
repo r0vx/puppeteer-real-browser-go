@@ -175,7 +175,7 @@ window.__clicks = 0;
 addEventListener('click', () => window.__clicks++, true);
 addEventListener('touchstart', e => window.__touchOff = e.touches[0].screenY - e.touches[0].clientY, {passive: true});
 for (const type of ['touchstart', 'touchmove', 'touchend', 'pointercancel'])
-  addEventListener(type, e => window.__t.push({type: e.type, cancelable: e.cancelable, t: performance.now()}), {passive: true});
+  addEventListener(type, e => window.__t.push({type: e.type, cancelable: e.cancelable, t: performance.now(), y: scrollY}), {passive: true});
 </script>`
 
 // TestAndroidSwipeScrolls 手机上 RealScroll 是手指拖动：有 touchstart / touchmove / touchend 与 pointercancel，
@@ -192,7 +192,8 @@ func TestAndroidSwipeScrolls(t *testing.T) {
 	}
 	time.Sleep(500 * time.Millisecond)
 	if y, _ := p.Evaluate(`scrollY`); y.(float64) < 900-30 || y.(float64) > 900+30 {
-		t.Errorf("scrollY = %v after RealScroll(0, 900), want 900 ± 30", y)
+		trail, _ := p.Evaluate(`JSON.stringify(window.__t.filter(e => e.type !== 'touchmove').map(e => e.type + '@' + Math.round(e.t) + ':' + Math.round(e.y)))`)
+		t.Errorf("scrollY = %v after RealScroll(0, 900), want 900 ± 30; touch trail %v", y, trail)
 	}
 	if off, _ := p.Evaluate(`window.__touchOff`); off != 88.0 {
 		t.Errorf("Touch screenY - clientY = %v, want 88", off)
