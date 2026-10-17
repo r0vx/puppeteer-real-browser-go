@@ -52,7 +52,7 @@ Public entry point: `browser.Connect(ctx, opts *ConnectOptions) (*BrowserInstanc
 - Extensions: `extension_manager.go`, `extension_installer.go`, `advanced_extension_injector.go`.
 - Xvfb: `xvfb.go` (real, Linux) vs `xvfb_stub.go` (build-tag stub for non-Linux).
 
-**Auxiliary `cmd/` tools** (each its own `package main`): `monitor` (resource/leak monitoring via `BrowserPool`), `stability_test` (long-running concurrency soak), `fingerprint_collector` (scrape real browser fingerprints into JSON), `fingerprint_stats` (config-pool combinatorics report).
+**Auxiliary `cmd/` tools** (each its own `package main`): `monitor` (resource/leak monitoring via `BrowserPool`), `stability_test` (long-running concurrency soak), `fingerprint_collector` (scrape real browser fingerprints into JSON), `fingerprint_stats` (config-pool combinatorics report), `baseline_server` (real-phone browser baselines for the mobile identity work: run `scripts/collect-baseline.sh`, which needs `cloudflared` and prints an https URL to open on the phone; results land in `test/baseline/`, the collector page is `test/baseline/collector.html` and is also exercised by `pkg/browser` tests).
 
 ## Conventions specific to this repo
 
