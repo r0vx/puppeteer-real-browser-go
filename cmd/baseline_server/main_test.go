@@ -1,16 +1,23 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
 const (
@@ -175,5 +182,86 @@ func TestServesPage(t *testing.T) {
 	s.routes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/favicon.ico", nil))
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("GET /favicon.ico = %d, want 404", rec.Code)
+	}
+}
+
+// TestCollectScriptRefusesBusyPort 端口被别的程序占用时，启动脚本报错退出且不开隧道，免得把那个程序暴露到公网
+func TestCollectScriptRefusesBusyPort(t *testing.T) {
+	busy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "another local service") }))
+	defer busy.Close()
+	port := busy.Listener.Addr().(*net.TCPAddr).Port
+
+	// 假的 cloudflared：被启动就留下标记
+	stubDir := t.TempDir()
+	marker := filepath.Join(stubDir, "tunnel-started")
+	stub := "#!/bin/sh\ntouch '" + marker + "'\nexec sleep 30\n"
+	if err := os.WriteFile(filepath.Join(stubDir, "cloudflared"), []byte(stub), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "bash", "../../scripts/collect-baseline.sh")
+	cmd.Env = append(os.Environ(), "PATH="+stubDir+string(os.PathListSeparator)+os.Getenv("PATH"), fmt.Sprintf("PORT=%d", port))
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Errorf("script succeeded on a busy port:\n%s", out)
+	}
+	if _, statErr := os.Stat(marker); statErr == nil {
+		t.Errorf("tunnel was started although port %d belongs to another service:\n%s", port, out)
+	}
+}
+
+// TestCollectScriptStartsTunnel 正常路径：服务就绪后才开隧道并打印地址；中断后服务、隧道都停止
+func TestCollectScriptStartsTunnel(t *testing.T) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := l.Addr().(*net.TCPAddr).Port
+	l.Close()
+
+	// 假的 cloudflared：确认此时本服务已在监听，再报出一个隧道地址
+	stubDir := t.TempDir()
+	stub := fmt.Sprintf("#!/bin/sh\ncurl -sf http://127.0.0.1:%d/ | grep -q collectBaseline || exit 1\necho 'https://stub-tunnel.trycloudflare.com' >&2\nexec sleep 30\n", port)
+	if err := os.WriteFile(filepath.Join(stubDir, "cloudflared"), []byte(stub), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "bash", "../../scripts/collect-baseline.sh")
+	cmd.Env = append(os.Environ(), "PATH="+stubDir+string(os.PathListSeparator)+os.Getenv("PATH"), fmt.Sprintf("PORT=%d", port))
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd.Stderr = cmd.Stdout
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for sc := bufio.NewScanner(stdout); sc.Scan(); {
+		if strings.Contains(sc.Text(), "在手机上打开： https://stub-tunnel.trycloudflare.com") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("script never printed the tunnel URL")
+	}
+	cmd.Process.Signal(syscall.SIGINT)
+	go func() { _, _ = io.Copy(io.Discard, stdout) }()
+	cmd.Wait()
+	// 服务停止后端口应已释放
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		c, err := net.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+		if err != nil {
+			break
+		}
+		c.Close()
+		if time.Now().After(deadline) {
+			t.Fatal("collector server still listening after the script was interrupted")
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 }

@@ -9,14 +9,36 @@ if ! command -v cloudflared >/dev/null 2>&1; then
   exit 1
 fi
 
-BIN="$(mktemp -d)/baseline_server"
+TMP="$(mktemp -d)"
+BIN="$TMP/baseline_server"
+LOG="$TMP/cloudflared.log"
+SERVER=""
+TUNNEL=""
+trap 'kill $SERVER $TUNNEL 2>/dev/null; rm -rf "$TMP"' EXIT INT TERM
 go build -o "$BIN" ./cmd/baseline_server
-LOG="$(mktemp)"
 "$BIN" -port "$PORT" &
 SERVER=$!
+
+# 确认是本服务在监听再开隧道：端口被别的程序占用时，绝不能把那个程序暴露到公网
+ready=""
+for _ in $(seq 1 50); do
+  if ! kill -0 "$SERVER" 2>/dev/null; then
+    echo "采集服务没有启动（端口 $PORT 可能被占用，可用 PORT=其他端口 重试）" >&2
+    exit 1
+  fi
+  if curl -sf "http://127.0.0.1:$PORT/" 2>/dev/null | grep -q collectBaseline; then
+    ready=1
+    break
+  fi
+  sleep 0.2
+done
+if [ -z "$ready" ]; then
+  echo "采集服务 10 秒内没有就绪，端口 $PORT 上不是本服务" >&2
+  exit 1
+fi
+
 cloudflared tunnel --no-autoupdate --url "http://127.0.0.1:$PORT" >"$LOG" 2>&1 &
 TUNNEL=$!
-trap 'kill "$SERVER" "$TUNNEL" 2>/dev/null; rm -f "$LOG" "$BIN"' EXIT INT TERM
 
 URL=""
 for _ in $(seq 1 60); do
