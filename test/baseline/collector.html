@@ -1,0 +1,426 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>真机基准采集</title>
+<style>
+  body { font: 16px/1.5 -apple-system, system-ui, sans-serif; margin: 16px; color: #222; background: #fff; }
+  .step { border: 1px solid #ccc; border-radius: 8px; padding: 12px; margin: 12px 0; }
+  .done { border-color: #2a2; background: #f3fff3; }
+  button { font-size: 18px; padding: 10px 20px; }
+  #type-input { font-size: 18px; width: 90%; padding: 8px; }
+  #swipe-zone { height: 180px; overflow-y: scroll; border: 1px dashed #888; }
+  #swipe-zone div { height: 900px; background: linear-gradient(#eef, #fee); }
+  #result-text { width: 100%; height: 160px; font-size: 12px; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<h1>真机基准采集</h1>
+<p id="status">正在采集浏览器信息…</p>
+<div id="step-tap" class="step">1. 用手指点一下：<button id="tap-btn" type="button">点我</button></div>
+<div id="step-type" class="step">2. 点输入框，用手机键盘输入 <b>ab1</b>：<br>
+  <input id="type-input" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"></div>
+<div id="step-swipe" class="step">3. 在下面的区域里上下滑动一次：<div id="swipe-zone"><div></div></div></div>
+<p><button id="skip-btn" type="button">跳过剩余步骤并上传</button></p>
+<div id="fallback" class="hidden">
+  <p>上传失败。请点“复制结果”，把内容发给开发者。</p>
+  <button id="copy-btn" type="button">复制结果</button>
+  <textarea id="result-text" readonly></textarea>
+</div>
+<script>
+(function () {
+  'use strict';
+
+  // safe 单项检测兜底：抛错时记为 {error: 消息}，不影响其他项
+  function safe(fn) {
+    try { return fn(); } catch (e) { return { error: String((e && e.message) || e) }; }
+  }
+
+  // safeAsync 异步检测的兜底
+  async function safeAsync(fn) {
+    try { return await fn(); } catch (e) { return { error: String((e && e.message) || e) }; }
+  }
+
+  // withTimeout 超时后返回 fallback
+  function withTimeout(p, ms, fallback) {
+    return Promise.race([p, new Promise(function (r) { setTimeout(function () { r(fallback); }, ms); })]);
+  }
+
+  // orNull undefined 记为 null，便于区分"没有"和"值为 false"
+  function orNull(v) { return v === undefined ? null : v; }
+
+  // identity 系统与浏览器标识，含 Client Hints（Safari 没有时为 null）
+  async function identity() {
+    const n = navigator;
+    const out = {
+      userAgent: n.userAgent, platform: n.platform, vendor: n.vendor, language: n.language,
+      languages: Array.from(n.languages || []), hardwareConcurrency: orNull(n.hardwareConcurrency),
+      deviceMemory: orNull(n.deviceMemory), maxTouchPoints: orNull(n.maxTouchPoints), webdriver: orNull(n.webdriver),
+      userAgentData: null,
+    };
+    const uad = n.userAgentData;
+    if (uad) {
+      const base = { brands: uad.brands.map(function (b) { return { brand: b.brand, version: b.version }; }), mobile: uad.mobile, platform: uad.platform };
+      const high = await safeAsync(function () {
+        return uad.getHighEntropyValues(['architecture', 'bitness', 'model', 'platformVersion', 'fullVersionList', 'formFactors', 'wow64']);
+      });
+      out.userAgentData = Object.assign(base, high.error ? { highEntropy: high } : {
+        architecture: orNull(high.architecture), bitness: orNull(high.bitness), model: orNull(high.model),
+        platformVersion: orNull(high.platformVersion), fullVersionList: orNull(high.fullVersionList),
+        formFactors: orNull(high.formFactors), wow64: orNull(high.wow64),
+      });
+    }
+    return out;
+  }
+
+  // screenInfo 屏幕、视口、窗口与方向
+  function screenInfo() {
+    const s = screen, vv = window.visualViewport;
+    return {
+      screen: { width: s.width, height: s.height, availWidth: s.availWidth, availHeight: s.availHeight,
+        availTop: orNull(s.availTop), availLeft: orNull(s.availLeft), colorDepth: s.colorDepth, pixelDepth: s.pixelDepth },
+      devicePixelRatio: window.devicePixelRatio,
+      innerWidth: window.innerWidth, innerHeight: window.innerHeight, outerWidth: window.outerWidth, outerHeight: window.outerHeight,
+      visualViewport: vv ? { width: vv.width, height: vv.height, scale: vv.scale, offsetTop: vv.offsetTop } : null,
+      orientation: s.orientation ? { type: s.orientation.type, angle: s.orientation.angle } : null,
+      windowOrientation: 'orientation' in window ? orNull(window.orientation) : null,
+    };
+  }
+
+  const WINDOW_APIS = ['showOpenFilePicker', 'showDirectoryPicker', 'queryLocalFonts', 'BarcodeDetector', 'DeviceMotionEvent',
+    'DeviceOrientationEvent', 'ontouchstart', 'TouchEvent', 'ApplePaySession', 'chrome', 'PaymentRequest', 'Notification',
+    'speechSynthesis', 'SharedWorker', 'webkitSpeechRecognition', 'EyeDropper', 'documentPictureInPicture', 'launchQueue',
+    'webkitRequestFileSystem', 'openDatabase', 'GestureEvent', 'WebKitCSSMatrix', 'visualViewport', 'MediaSource',
+    'ManagedMediaSource'];
+  const NAVIGATOR_APIS = ['hid', 'serial', 'usb', 'bluetooth', 'keyboard', 'windowControlsOverlay', 'contacts', 'share',
+    'canShare', 'getBattery', 'vibrate', 'wakeLock', 'virtualKeyboard', 'serviceWorker', 'mediaDevices', 'credentials', 'gpu',
+    'xr', 'scheduling', 'userActivation', 'ink', 'presentation', 'devicePosture', 'getInstalledRelatedApps', 'setAppBadge',
+    'webkitTemporaryStorage', 'connection', 'standalone'];
+
+  // permissionStates 只查询权限状态，不申请
+  async function permissionStates() {
+    const out = {};
+    for (const name of ['notifications', 'geolocation', 'camera']) {
+      out[name] = await safeAsync(async function () {
+        if (!navigator.permissions) return null;
+        return (await navigator.permissions.query({ name: name })).state;
+      });
+    }
+    return out;
+  }
+
+  // features 接口有无，以及手机与桌面行为不同的几项
+  async function features() {
+    const present = {};
+    for (const k of WINDOW_APIS) present['window.' + k] = safe(function () { return k in window; });
+    for (const k of NAVIGATOR_APIS) present['navigator.' + k] = safe(function () { return k in navigator; });
+    const c = navigator.connection;
+    return {
+      present: present,
+      plugins: safe(function () { return navigator.plugins.length; }),
+      mimeTypes: safe(function () { return navigator.mimeTypes.length; }),
+      pdfViewerEnabled: safe(function () { return orNull(navigator.pdfViewerEnabled); }),
+      notificationConstructor: safe(function () {
+        try { new Notification('baseline'); return 'constructs'; } catch (e) { return e.name + ': ' + e.message; }
+      }),
+      connection: c ? { type: orNull(c.type), effectiveType: orNull(c.effectiveType), downlinkMax: orNull(c.downlinkMax),
+        rtt: orNull(c.rtt), saveData: orNull(c.saveData) } : null,
+      chromeKeys: safe(function () { return window.chrome ? Object.keys(window.chrome) : null; }),
+      permissions: await permissionStates(),
+    };
+  }
+
+  const MEDIA = {
+    'pointer': ['none', 'coarse', 'fine'], 'hover': ['none', 'hover'],
+    'any-pointer': ['none', 'coarse', 'fine'], 'any-hover': ['none', 'hover'],
+    'prefers-color-scheme': ['light', 'dark'], 'prefers-reduced-motion': ['no-preference', 'reduce'],
+    'color-gamut': ['srgb', 'p3', 'rec2020'], 'dynamic-range': ['standard', 'high'],
+    'display-mode': ['browser', 'standalone', 'minimal-ui', 'fullscreen'], 'forced-colors': ['none', 'active'],
+    'prefers-contrast': ['no-preference', 'more', 'less', 'custom'],
+  };
+
+  // media 每个媒体特性匹配上的取值
+  function media() {
+    const out = {};
+    for (const f of Object.keys(MEDIA)) {
+      out[f] = safe(function () { return MEDIA[f].filter(function (v) { return matchMedia('(' + f + ': ' + v + ')').matches; }); });
+    }
+    return out;
+  }
+
+  const GL_PARAMS = ['MAX_TEXTURE_SIZE', 'MAX_CUBE_MAP_TEXTURE_SIZE', 'MAX_RENDERBUFFER_SIZE', 'MAX_VIEWPORT_DIMS',
+    'MAX_VERTEX_ATTRIBS', 'MAX_VERTEX_UNIFORM_VECTORS', 'MAX_FRAGMENT_UNIFORM_VECTORS', 'MAX_VARYING_VECTORS',
+    'MAX_TEXTURE_IMAGE_UNITS', 'MAX_VERTEX_TEXTURE_IMAGE_UNITS', 'MAX_COMBINED_TEXTURE_IMAGE_UNITS',
+    'ALIASED_POINT_SIZE_RANGE', 'ALIASED_LINE_WIDTH_RANGE', 'RED_BITS', 'GREEN_BITS', 'BLUE_BITS', 'ALPHA_BITS',
+    'DEPTH_BITS', 'STENCIL_BITS', 'SUBPIXEL_BITS', 'SAMPLES', 'SAMPLE_BUFFERS'];
+  const GL2_PARAMS = ['MAX_3D_TEXTURE_SIZE', 'MAX_ARRAY_TEXTURE_LAYERS', 'MAX_DRAW_BUFFERS', 'MAX_COLOR_ATTACHMENTS',
+    'MAX_SAMPLES', 'MAX_UNIFORM_BLOCK_SIZE', 'MAX_UNIFORM_BUFFER_BINDINGS', 'MAX_COMBINED_UNIFORM_BLOCKS',
+    'MAX_VERTEX_UNIFORM_COMPONENTS', 'MAX_FRAGMENT_UNIFORM_COMPONENTS', 'MAX_VARYING_COMPONENTS',
+    'MAX_TRANSFORM_FEEDBACK_SEPARATE_COMPONENTS', 'MAX_ELEMENT_INDEX', 'MAX_SERVER_WAIT_TIMEOUT', 'MAX_TEXTURE_LOD_BIAS',
+    'MAX_VERTEX_OUTPUT_COMPONENTS', 'MAX_FRAGMENT_INPUT_COMPONENTS', 'MAX_PROGRAM_TEXEL_OFFSET', 'MIN_PROGRAM_TEXEL_OFFSET'];
+
+  // plain 类型化数组转普通数组，便于 JSON
+  function plain(v) { return v && typeof v === 'object' && 'length' in v ? Array.from(v) : v; }
+
+  // webgl 一个上下文的标识、能力参数、着色器精度与扩展；拿不到上下文时为 null
+  function webgl(kind) {
+    const gl = document.createElement('canvas').getContext(kind);
+    if (!gl) return null;
+    const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+    const out = {
+      vendor: gl.getParameter(gl.VENDOR), renderer: gl.getParameter(gl.RENDERER),
+      version: gl.getParameter(gl.VERSION), shadingLanguageVersion: gl.getParameter(gl.SHADING_LANGUAGE_VERSION),
+      unmaskedVendor: dbg ? gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL) : null,
+      unmaskedRenderer: dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : null,
+      params: {}, precision: {}, extensions: gl.getSupportedExtensions(), contextAttributes: gl.getContextAttributes(),
+    };
+    for (const p of kind === 'webgl2' ? GL_PARAMS.concat(GL2_PARAMS) : GL_PARAMS) {
+      out.params[p] = safe(function () { return plain(gl.getParameter(gl[p])); });
+    }
+    for (const shader of ['VERTEX_SHADER', 'FRAGMENT_SHADER']) {
+      for (const t of ['LOW_FLOAT', 'MEDIUM_FLOAT', 'HIGH_FLOAT', 'LOW_INT', 'MEDIUM_INT', 'HIGH_INT']) {
+        out.precision[shader + '.' + t] = safe(function () {
+          const f = gl.getShaderPrecisionFormat(gl[shader], gl[t]);
+          return [f.rangeMin, f.rangeMax, f.precision];
+        });
+      }
+    }
+    return out;
+  }
+
+  const FONTS = [
+    // Windows
+    'Arial', 'Arial Black', 'Calibri', 'Cambria', 'Candara', 'Comic Sans MS', 'Consolas', 'Constantia', 'Corbel',
+    'Courier New', 'Georgia', 'Impact', 'Lucida Console', 'Lucida Sans Unicode', 'Microsoft YaHei', 'Microsoft JhengHei',
+    'MS Gothic', 'Palatino Linotype', 'Segoe UI', 'Segoe UI Emoji', 'SimSun', 'SimHei', 'KaiTi', 'FangSong', 'Tahoma',
+    'Times New Roman', 'Trebuchet MS', 'Verdana', 'Webdings', 'Wingdings',
+    // macOS / iOS
+    'Helvetica', 'Helvetica Neue', 'PingFang SC', 'PingFang TC', 'Heiti SC', 'STHeiti', 'Hiragino Sans GB',
+    'Apple Color Emoji', 'Apple SD Gothic Neo', 'Avenir', 'Avenir Next', 'Menlo', 'Monaco', 'Geneva', 'Gill Sans',
+    'Futura', 'Optima', 'Didot', 'American Typewriter', 'Marker Felt', 'Noteworthy', 'Songti SC', 'Kaiti SC', 'Courier',
+    'Thonburi', 'Arial Hebrew', 'Damascus', 'Snell Roundhand', 'Chalkboard SE', 'Zapfino',
+    // 安卓与各厂商
+    'Roboto', 'Roboto Condensed', 'Roboto Mono', 'Noto Sans', 'Noto Serif', 'Noto Sans CJK SC', 'Noto Sans SC',
+    'Noto Serif CJK SC', 'Noto Color Emoji', 'Droid Sans', 'Droid Sans Mono', 'Droid Serif', 'Source Sans Pro',
+    'Cutive Mono', 'Coming Soon', 'Dancing Script', 'Carrois Gothic SC', 'MiSans', 'MiSans VF', 'Mi Lan Pro VF',
+    'HarmonyOS Sans', 'HarmonyOS Sans SC', 'OPPOSans', 'vivo Sans', 'SamsungOne', 'Google Sans', 'Product Sans',
+    // 常见中文
+    'Source Han Sans SC', 'Source Han Serif SC', 'WenQuanYi Micro Hei', 'WenQuanYi Zen Hei', 'Noto Sans CJK TC',
+    'DengXian', 'YouYuan', 'LiSu', 'STKaiti', 'STSong',
+  ];
+
+  // fonts 与三种基础字体比较文字宽度判断字体是否存在
+  function fonts() {
+    const ctx = document.createElement('canvas').getContext('2d');
+    const text = 'mmmmmmmmmmlli1WwQ@中文字体';
+    const width = function (f) { ctx.font = '72px ' + f; return ctx.measureText(text).width; };
+    const bases = ['monospace', 'sans-serif', 'serif'];
+    const baseWidths = bases.map(width);
+    const out = {};
+    for (const f of FONTS) {
+      out[f] = bases.some(function (b, i) { return width('"' + f + '", ' + b) !== baseWidths[i]; });
+    }
+    return out;
+  }
+
+  // errorOf 执行一段必然报错的代码，返回错误类型与消息
+  function errorOf(fn) {
+    try { fn(); return null; } catch (e) { return { name: e.name, message: e.message }; }
+  }
+
+  // engine JS 引擎特征：报错文本、调用栈格式（地址替换为 <url>）、原生函数文本、数学精度、Intl 设置
+  function engine() {
+    return {
+      nullProperty: errorOf(function () { const o = null; return o.x; }),
+      callUndefined: errorOf(function () { const f = undefined; f(); }),
+      jsonParse: errorOf(function () { JSON.parse('{bad'); }),
+      stackSample: safe(function () {
+        try { null.f(); } catch (e) {
+          return String(e.stack || '').replace(/(https?|file|blob):\/\/[^\s)]+/g, '<url>').split('\n').slice(0, 4).join('\n');
+        }
+        return null;
+      }),
+      nativeToString: Function.prototype.toString.call(Math.max),
+      math: { tanNeg1e300: Math.tan(-1e300), sinh1: Math.sinh(1), expm1: Math.expm1(1), cbrt100: Math.cbrt(100),
+        log1p10: Math.log1p(10), acosh1e300: Math.acosh(1e300), atan2: Math.atan2(0.5, 1.5), powPi: Math.pow(Math.PI, -100) },
+      intl: safe(function () {
+        const d = Intl.DateTimeFormat().resolvedOptions(), n = Intl.NumberFormat().resolvedOptions();
+        return { locale: d.locale, timeZone: d.timeZone, calendar: d.calendar, numberingSystem: d.numberingSystem, numberLocale: n.locale };
+      }),
+    };
+  }
+
+  const MIME = ['video/mp4; codecs="avc1.42E01E"', 'video/mp4; codecs="avc1.640028"', 'video/mp4; codecs="hev1.1.6.L93.B0"',
+    'video/mp4; codecs="hvc1.1.6.L93.B0"', 'video/mp4; codecs="av01.0.05M.08"', 'video/webm; codecs="vp8"',
+    'video/webm; codecs="vp9"', 'video/webm; codecs="av01.0.05M.08"', 'video/ogg; codecs="theora"', 'video/quicktime',
+    'application/vnd.apple.mpegurl', 'application/x-mpegURL', 'audio/mp4; codecs="mp4a.40.2"', 'audio/mpeg',
+    'audio/webm; codecs="opus"', 'audio/ogg; codecs="vorbis"', 'audio/ogg; codecs="opus"', 'audio/wav', 'audio/flac',
+    'audio/aac', 'audio/x-m4a'];
+
+  // voices 语音数量与前 5 个（列表为空时等 voiceschanged 最多 1 秒）；没有语音接口时为 null
+  async function voices() {
+    if (!('speechSynthesis' in window)) return null;
+    let list = speechSynthesis.getVoices();
+    if (!list.length) {
+      list = await withTimeout(new Promise(function (r) {
+        speechSynthesis.addEventListener('voiceschanged', function () { r(speechSynthesis.getVoices()); }, { once: true });
+      }), 1000, []);
+    }
+    return { count: list.length, first: list.slice(0, 5).map(function (v) { return { name: v.name, lang: v.lang }; }) };
+  }
+
+  // avmedia 语音、音视频解码支持、媒体设备（只记各类数量）
+  async function avmedia() {
+    const video = document.createElement('video');
+    const codecs = {};
+    for (const m of MIME) {
+      codecs[m] = {
+        canPlayType: safe(function () { return video.canPlayType(m); }),
+        mediaSource: safe(function () { return window.MediaSource ? MediaSource.isTypeSupported(m) : null; }),
+      };
+    }
+    return {
+      voices: await safeAsync(voices),
+      codecs: codecs,
+      devices: await safeAsync(async function () {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return null;
+        const counts = {};
+        for (const d of await navigator.mediaDevices.enumerateDevices()) counts[d.kind] = (counts[d.kind] || 0) + 1;
+        return counts;
+      }),
+    };
+  }
+
+  // collectBaseline 自动采集全部组
+  async function collectBaseline() {
+    return {
+      identity: await safeAsync(identity),
+      screen: safe(screenInfo),
+      features: await safeAsync(features),
+      media: safe(media),
+      webgl: safe(function () { return webgl('webgl'); }),
+      webgl2: safe(function () { return webgl('webgl2'); }),
+      fonts: safe(fonts),
+      engine: safe(engine),
+      avmedia: await safeAsync(avmedia),
+    };
+  }
+  window.collectBaseline = collectBaseline;
+
+  // ---------- 交互记录 ----------
+  const MAX_EVENTS = 600;
+  const EVENT_TYPES = ['pointerover', 'pointerenter', 'pointerdown', 'pointermove', 'pointerup', 'pointercancel',
+    'pointerout', 'pointerleave', 'touchstart', 'touchmove', 'touchend', 'touchcancel', 'mouseover', 'mousemove',
+    'mousedown', 'mouseup', 'click', 'keydown', 'keypress', 'keyup', 'beforeinput', 'input', 'compositionstart',
+    'compositionupdate', 'compositionend', 'scroll'];
+  const FIELDS = ['pointerType', 'pointerId', 'isPrimary', 'width', 'height', 'pressure', 'tangentialPressure', 'tiltX',
+    'tiltY', 'twist', 'button', 'buttons', 'detail', 'clientX', 'clientY', 'screenX', 'screenY', 'key', 'code', 'keyCode',
+    'which', 'location', 'repeat', 'isComposing', 'inputType', 'data'];
+  const interaction = { events: [], truncated: false, steps: { tap: false, type: false, swipe: false } };
+  let t0 = null;
+
+  // stepOf 事件发生在哪一步的区域
+  function stepOf(el) {
+    if (!el || !el.closest) return 'other';
+    if (el.closest('#step-tap')) return 'tap';
+    if (el.closest('#step-type')) return 'type';
+    if (el.closest('#step-swipe')) return 'swipe';
+    return 'other';
+  }
+
+  // touchList 触点列表转普通对象
+  function touchList(list) {
+    return Array.from(list).map(function (t) {
+      return { identifier: t.identifier, clientX: t.clientX, clientY: t.clientY, radiusX: t.radiusX, radiusY: t.radiusY,
+        rotationAngle: t.rotationAngle, force: t.force };
+    });
+  }
+
+  // record 记录一个事件的属性；超过上限后只标记 truncated
+  function record(e) {
+    try {
+      if (interaction.events.length >= MAX_EVENTS) { interaction.truncated = true; return; }
+      if (t0 === null) t0 = e.timeStamp;
+      const el = e.target && e.target.nodeType === 1 ? e.target : null;
+      const ev = { step: stepOf(el), type: e.type, isTrusted: e.isTrusted, t: Math.round((e.timeStamp - t0) * 10) / 10,
+        target: el ? (el.id || el.tagName.toLowerCase()) : 'document' };
+      for (const k of FIELDS) if (e[k] !== undefined) ev[k] = e[k];
+      if (e.touches) { ev.touches = touchList(e.touches); ev.changedTouches = touchList(e.changedTouches); }
+      if (e.type === 'scroll' && el) ev.scrollTop = el.scrollTop;
+      interaction.events.push(ev);
+    } catch (err) {
+      // 记录失败不影响页面
+    }
+  }
+  for (const type of EVENT_TYPES) document.addEventListener(type, record, { capture: true, passive: true });
+
+  // status 显示当前进度
+  function status(msg) { document.getElementById('status').textContent = msg; }
+
+  // markDone 标记一步完成；三步都完成后上传
+  function markDone(step) {
+    if (interaction.steps[step]) return;
+    interaction.steps[step] = true;
+    document.getElementById('step-' + step).classList.add('done');
+    if (interaction.steps.tap && interaction.steps.type && interaction.steps.swipe) finish();
+  }
+
+  document.getElementById('tap-btn').addEventListener('click', function () { markDone('tap'); });
+  document.getElementById('type-input').addEventListener('input', function (e) {
+    // 等最后一个键的 keyup 也记录下来
+    if (e.target.value.toLowerCase().indexOf('ab1') !== -1) setTimeout(function () { markDone('type'); }, 800);
+  });
+  const zone = document.getElementById('swipe-zone');
+  let scrolled = false;
+  zone.addEventListener('scroll', function () { scrolled = true; }, { passive: true });
+  zone.addEventListener('touchend', function () {
+    // 惯性滚动还会持续一会儿，等 1 秒再结束
+    if (scrolled) setTimeout(function () { markDone('swipe'); }, 1000);
+  }, { passive: true });
+
+  window.__baselineState = 'collecting';
+  const autoPromise = collectBaseline().catch(function (e) { return { error: String(e) }; }).then(function (r) {
+    window.__baselineAuto = r;
+    window.__baselineState = 'ready';
+    status('浏览器信息已采集。请完成下面三步。');
+    return r;
+  });
+
+  let finished = false;
+
+  // finish 结束交互并上传；失败时显示复制备用
+  async function finish() {
+    if (finished) return;
+    finished = true;
+    status('正在上传…');
+    const auto = await autoPromise;
+    const result = { schema: 1, collectedAt: new Date().toISOString(), auto: auto, interaction: interaction };
+    const text = JSON.stringify(result);
+    window.__baselineResult = result;
+    try {
+      const resp = await fetch('result', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: text });
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const body = await resp.json();
+      window.__baselineState = 'uploaded';
+      status('已上传：' + body.file + '。可以关闭页面了。');
+    } catch (e) {
+      window.__baselineState = 'upload-failed';
+      status('上传失败（' + e.message + '）');
+      document.getElementById('result-text').value = text;
+      document.getElementById('fallback').classList.remove('hidden');
+    }
+  }
+  window.finishBaseline = finish;
+
+  document.getElementById('skip-btn').addEventListener('click', finish);
+  document.getElementById('copy-btn').addEventListener('click', async function () {
+    const ta = document.getElementById('result-text');
+    try { await navigator.clipboard.writeText(ta.value); } catch (e) { ta.select(); document.execCommand('copy'); }
+    status('已复制');
+  });
+})();
+</script>
+</body>
+</html>
