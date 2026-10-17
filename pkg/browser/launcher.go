@@ -31,15 +31,21 @@ func NewChromeLauncher() *ChromeLauncher {
 
 // Launch starts a Chrome process with the given options
 func (cl *ChromeLauncher) Launch(ctx context.Context, opts *ConnectOptions) (*ChromeProcess, error) {
-	// 无界面 + 账号指纹：启动时就让浏览器原生报告账号屏幕（见 headlessScreenFlags）；指纹文件损坏在这里就报错
+	// 设了账号指纹时先加载：无界面时让浏览器原生报告账号屏幕（见 headlessScreenFlags），
+	// 手机身份还要改 profile 偏好；指纹文件损坏在这里就报错
 	var screenFlags []string
-	if opts.FingerprintUserID != "" && len(config.GetHeadlessFlags(opts.Headless)) > 0 {
+	var fingerprint *FingerprintConfig
+	if opts.FingerprintUserID != "" {
 		cfg, err := fingerprintForOptions(opts)
 		if err != nil {
 			return nil, err
 		}
-		screenFlags = headlessScreenFlags(configGeometry(cfg))
+		fingerprint = cfg
+		if len(config.GetHeadlessFlags(opts.Headless)) > 0 {
+			screenFlags = headlessScreenFlags(configGeometry(cfg))
+		}
 	}
+	mobile := fingerprint != nil && configOS(fingerprint) == OSAndroid
 
 	// Setup Xvfb on Linux if headless is false and Xvfb is not disabled
 	if err := cl.setupXvfb(opts); err != nil {
@@ -69,6 +75,14 @@ func (cl *ChromeLauncher) Launch(ctx context.Context, opts *ConnectOptions) (*Ch
 	}
 	if opts.Proxy != nil {
 		if err := setWebRTCPolicy(userDataDir); err != nil {
+			if tempDir != "" {
+				os.RemoveAll(tempDir)
+			}
+			return nil, err
+		}
+	}
+	if mobile {
+		if err := disablePDFViewer(userDataDir); err != nil {
 			if tempDir != "" {
 				os.RemoveAll(tempDir)
 			}
@@ -434,9 +448,35 @@ func fileExists(path string) bool {
 }
 
 // setWebRTCPolicy 配置了代理时写进 profile 的 WebRTC 设置：禁止绕过代理直连 UDP，否则 STUN 会暴露真实公网 IP。
-// 与 Chrome 设置里的 webrtc.ip_handling_policy 是同一项；--force-webrtc-ip-handling-policy 启动参数在 Chrome 154 上不生效。
-// 已有的 Preferences（持久化 profile）只改 webrtc 段，其余设置原样保留
+// 与 Chrome 设置里的 webrtc.ip_handling_policy 是同一项；--force-webrtc-ip-handling-policy 启动参数在 Chrome 154 上不生效
 func setWebRTCPolicy(userDataDir string) error {
+	return updatePreferences(userDataDir, func(prefs map[string]any) {
+		webrtc, _ := prefs["webrtc"].(map[string]any)
+		if webrtc == nil {
+			webrtc = map[string]any{}
+		}
+		webrtc["ip_handling_policy"] = "disable_non_proxied_udp"
+		webrtc["multiple_routes_enabled"] = false
+		webrtc["nonproxied_udp_enabled"] = false
+		prefs["webrtc"] = webrtc
+	})
+}
+
+// disablePDFViewer 手机身份：关掉内置 PDF 查看器（与 Chrome 设置"下载 PDF 文件"是同一项）。
+// 安卓 Chrome 没有 PDF 插件；这样 navigator.plugins / mimeTypes 原生为空、pdfViewerEnabled 原生为 false（Chrome 155 实测）
+func disablePDFViewer(userDataDir string) error {
+	return updatePreferences(userDataDir, func(prefs map[string]any) {
+		plugins, _ := prefs["plugins"].(map[string]any)
+		if plugins == nil {
+			plugins = map[string]any{}
+		}
+		plugins["always_open_pdf_externally"] = true
+		prefs["plugins"] = plugins
+	})
+}
+
+// updatePreferences 修改 profile 的 Preferences：已有的设置（持久化 profile）原样保留，只改 edit 动到的部分
+func updatePreferences(userDataDir string, edit func(map[string]any)) error {
 	path := filepath.Join(userDataDir, "Default", "Preferences")
 	prefs := map[string]any{}
 	data, err := os.ReadFile(path)
@@ -450,14 +490,7 @@ func setWebRTCPolicy(userDataDir string) error {
 	case !errors.Is(err, fs.ErrNotExist):
 		return fmt.Errorf("read %s: %w", path, err)
 	}
-	webrtc, _ := prefs["webrtc"].(map[string]any)
-	if webrtc == nil {
-		webrtc = map[string]any{}
-	}
-	webrtc["ip_handling_policy"] = "disable_non_proxied_udp"
-	webrtc["multiple_routes_enabled"] = false
-	webrtc["nonproxied_udp_enabled"] = false
-	prefs["webrtc"] = webrtc
+	edit(prefs)
 	out, err := json.Marshal(prefs)
 	if err != nil {
 		return fmt.Errorf("encode %s: %w", path, err)

@@ -775,8 +775,8 @@ func (p *CustomCDPPage) SetViewport(width, height int) error {
 	if _, err := p.client.sendCommand("Emulation.setDeviceMetricsOverride", viewportOverride(p.identity, width, height)); err != nil {
 		return err
 	}
-	if p.identity == nil || p.identity.Screen.Width == 0 || p.targetID == "" {
-		return nil // 身份不调整几何（有界面且不设指纹）时不动用户可见的窗口
+	if p.identity == nil || p.identity.Screen.Width == 0 || p.identity.Screen.Mobile || p.targetID == "" {
+		return nil // 身份不调整几何（有界面且不设指纹）时不动用户可见的窗口；手机身份的窗口外框由移动端模拟决定
 	}
 	browser := func(m string, params any) (json.RawMessage, error) { return p.client.conn.call("", m, params) }
 	return setTargetWindowBounds(browser, p.targetID, viewportWindowBounds(width, height))

@@ -80,7 +80,8 @@ func (tm *targetManager) onAttached(_ string, params json.RawMessage) {
 	var err error
 	if handled {
 		err = applyIdentity(call, tm.identity, kind)
-		if err == nil && kind == kindPage && tm.identity.Screen.Width > 0 {
+		// 手机身份的窗口外框由移动端模拟决定（等于视口），不调整窗口
+		if err == nil && kind == kindPage && tm.identity.Screen.Width > 0 && !tm.identity.Screen.Mobile {
 			err = setTargetWindowBounds(tm.browserCall, ev.TargetInfo.TargetID, windowBounds(tm.identity))
 		}
 		if _, e := call("Target.setAutoAttach", autoAttachParams); e != nil && err == nil {

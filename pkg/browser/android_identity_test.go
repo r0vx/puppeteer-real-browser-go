@@ -159,3 +159,41 @@ func TestConnectRejectsMobileMisuse(t *testing.T) {
 		}
 	}
 }
+
+// TestAndroidIdentityFromConfig 安卓身份：UA 与 Client Hints、屏幕与视口、内存与电量都由机型与真实浏览器派生
+func TestAndroidIdentityFromConfig(t *testing.T) {
+	cfg := &FingerprintConfig{UserID: "acct-id", Device: &DeviceConfig{Kind: deviceKindAndroid, Model: "PGKM10"}}
+	cfg.Normalize()
+	id, err := identityFromConfig(cfg, testHost())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id.OS != OSAndroid || id.UserAgent != androidUserAgent("154") || id.Platform != androidPlatform || id.DeviceMemory != 8 || id.HardwareConcurrency != 8 {
+		t.Errorf("identity %+v", id)
+	}
+	m := id.Metadata
+	if m.Platform != "Android" || m.PlatformVersion != "15.0.0" || m.Model != "PGKM10" || !m.Mobile || m.Architecture != "" || m.Bitness != "" ||
+		len(m.FormFactors) != 1 || m.FormFactors[0] != "Mobile" || len(m.Brands) == 0 {
+		t.Errorf("metadata %+v", m)
+	}
+	s := id.Screen
+	if s.Width != 360 || s.Height != 804 || s.DPR != 3 || s.InnerWidth != 360 || s.InnerHeight != 700 || s.OuterHeight != 700 || !s.Mobile {
+		t.Errorf("screen %+v", s)
+	}
+	if id.Battery < 0.35 || id.Battery > 0.95 || id.Battery != androidBattery("acct-id") {
+		t.Errorf("battery %v", id.Battery)
+	}
+	if id.GPU == nil || id.GPU.Mobile == nil || id.GPU.Renderer != "Mali-G610 MC6" {
+		t.Errorf("gpu %+v", id.GPU)
+	}
+}
+
+// TestAndroidHeadlessScreenFlags 无界面启动参数用手机的物理分辨率与 DPR，整屏都是可用区域
+func TestAndroidHeadlessScreenFlags(t *testing.T) {
+	cfg := &FingerprintConfig{UserID: "acct-flags", Device: &DeviceConfig{Kind: deviceKindAndroid, Model: "PGKM10"}}
+	cfg.Normalize()
+	got := strings.Join(headlessScreenFlags(configGeometry(cfg)), " ")
+	if want := "--screen-info={0,0 1080x2412 workAreaTop=0 workAreaBottom=0} --force-device-scale-factor=3"; got != want {
+		t.Errorf("flags %q, want %q", got, want)
+	}
+}

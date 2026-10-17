@@ -1,5 +1,10 @@
 package browser
 
+import (
+	"fmt"
+	"strings"
+)
+
 // 安卓身份（移动身份子项目 M1）：机型档案、派生规则与 WebGL 实测值。
 // 设计见 docs/superpowers/specs/2026-10-17-android-identity-design.md
 
@@ -164,4 +169,43 @@ func normalizeAndroid(config *FingerprintConfig, seed func(string) uint64) {
 	config.WebGL.ShadingLanguageVersion = "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)"
 	config.WebGL.MaxTextureSize = dev.GPU.Mobile.Params[3379].(int)
 	config.WebGL.MaxRenderbufferSize = dev.GPU.Mobile.Params[34024].(int)
+}
+
+// portraitOrientation 手机竖屏（setDeviceMetricsOverride 的 screenOrientation）
+var portraitOrientation = map[string]any{"type": "portraitPrimary", "angle": 0}
+
+// androidBattery 账号固定的电量（0.35–0.95）：宿主是服务器没有电池，原生恒为满电在充，每个手机账号都一样
+func androidBattery(userID string) float64 {
+	return float64(35+identitySeed(userID, "battery")%61) / 100
+}
+
+// androidIdentity 安卓身份：机型档案提供屏幕、显卡、系统版本，版本与品牌取自真实浏览器
+func androidIdentity(cfg *FingerprintConfig, host hostInfo) (*Identity, error) {
+	dev, ok := lookupAndroidDevice(cfg.Device.Model)
+	if !ok {
+		return nil, fmt.Errorf("fingerprint %s: android model %q is not in the pool (config not normalized)", cfg.UserID, cfg.Device.Model)
+	}
+	if len(cfg.Browser.Languages) == 0 {
+		return nil, fmt.Errorf("fingerprint %s: no languages", cfg.UserID)
+	}
+	gpu := dev.GPU
+	return &Identity{
+		OS:                  OSAndroid,
+		UserAgent:           androidUserAgent(host.majorVersion()),
+		Platform:            androidPlatform,
+		AcceptLanguage:      strings.Join(cfg.Browser.Languages, ","),
+		Languages:           cfg.Browser.Languages,
+		Timezone:            cfg.Timezone.Timezone,
+		HardwareConcurrency: androidCores,
+		DeviceMemory:        androidDeviceMemory,
+		Battery:             androidBattery(cfg.UserID),
+		Metadata: uaMetadata{
+			Brands: host.Brands, FullVersionList: host.FullVersionList, Platform: "Android", PlatformVersion: dev.PlatformVersion,
+			Model: dev.Model, Mobile: true, FormFactors: []string{"Mobile"},
+		},
+		Screen:    androidGeometry(dev.Screen),
+		GPU:       &gpu,
+		NoiseSeed: noiseSeed(cfg.UserID),
+		ScriptKey: newScriptKey(),
+	}, nil
 }

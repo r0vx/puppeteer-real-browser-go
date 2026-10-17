@@ -6,14 +6,21 @@ import (
 
 // jsIdentity 注入脚本使用的身份子集，以 JSON 嵌入脚本
 type jsIdentity struct {
-	UserAgent           string    `json:"userAgent"`
-	Platform            string    `json:"platform"`
-	Languages           []string  `json:"languages"`
-	HardwareConcurrency int       `json:"hardwareConcurrency"`
-	Screen              *jsScreen `json:"screen,omitempty"`
-	WebGL               *jsWebGL  `json:"webgl,omitempty"`
-	Seed                uint32    `json:"seed"`
-	Key                 string    `json:"key"` // 见 Identity.ScriptKey
+	UserAgent           string     `json:"userAgent"`
+	Platform            string     `json:"platform"`
+	Languages           []string   `json:"languages"`
+	HardwareConcurrency int        `json:"hardwareConcurrency"`
+	Screen              *jsScreen  `json:"screen,omitempty"`
+	WebGL               *jsWebGL   `json:"webgl,omitempty"`
+	Seed                uint32     `json:"seed"`
+	Android             *jsAndroid `json:"android,omitempty"`
+	Key                 string     `json:"key"` // 见 Identity.ScriptKey
+}
+
+// jsAndroid 安卓身份专有：内存与电量
+type jsAndroid struct {
+	DeviceMemory int     `json:"deviceMemory"`
+	Battery      float64 `json:"battery"`
 }
 
 // jsScreen 屏幕与可用区域
@@ -65,6 +72,9 @@ func identityScript(id *Identity, worker bool) string {
 	if id.Screen.Width > 0 {
 		s := id.Screen
 		cfg.Screen = &jsScreen{Width: s.Width, Height: s.Height, AvailWidth: s.AvailWidth, AvailHeight: s.AvailHeight, AvailTop: s.AvailTop, DPR: s.DPR}
+	}
+	if id.OS == OSAndroid {
+		cfg.Android = &jsAndroid{DeviceMemory: id.DeviceMemory, Battery: id.Battery}
 	}
 	if id.GPU != nil {
 		cfg.WebGL = &jsWebGL{Vendor: id.GPU.Vendor, Renderer: id.GPU.Renderer, Params: webglParams(id.GPU.Caps)}
@@ -190,6 +200,10 @@ if (C.seed && G.OffscreenCanvas && G.OffscreenCanvasRenderingContext2D) {
     ctx.putImageData(img, 0, 0);
     return Reflect.apply(orig, copy, args);
   });
+}
+if (C.android) {
+  // 内存（页面与 Worker）
+  for (const N of [G.Navigator, G.WorkerNavigator]) if (N) patchGetter(N.prototype, 'deviceMemory', () => C.android.deviceMemory);
 }
 `
 

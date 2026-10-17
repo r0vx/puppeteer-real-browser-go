@@ -166,10 +166,18 @@ func applyIdentity(call cdpCaller, id *Identity, kind targetKind) error {
 	// iframe 不支持 setDeviceMetricsOverride（只能用于顶层目标），其屏幕与 DPR 由注入脚本补
 	if kind == kindPage && id.Screen.Width > 0 {
 		s := id.Screen
-		steps = append(steps, cdpStep{"Emulation.setDeviceMetricsOverride", map[string]any{
-			"width": s.InnerWidth, "height": s.InnerHeight, "deviceScaleFactor": s.DPR, "mobile": false,
+		metrics := map[string]any{
+			"width": s.InnerWidth, "height": s.InnerHeight, "deviceScaleFactor": s.DPR, "mobile": s.Mobile,
 			"screenWidth": s.Width, "screenHeight": s.Height,
-		}})
+		}
+		if s.Mobile {
+			metrics["screenOrientation"] = portraitOrientation
+		}
+		steps = append(steps, cdpStep{"Emulation.setDeviceMetricsOverride", metrics})
+	}
+	// 手机：页面与 iframe 都开触屏模拟（maxTouchPoints、ontouchstart、pointer: coarse 按目标生效）
+	if id.Screen.Mobile {
+		steps = append(steps, cdpStep{"Emulation.setTouchEmulationEnabled", map[string]any{"enabled": true, "maxTouchPoints": androidTouchPoints}})
 	}
 	steps = append(steps, cdpStep{"Page.addScriptToEvaluateOnNewDocument", map[string]any{"source": identityScript(id, false)}})
 
@@ -186,11 +194,14 @@ func applyIdentity(call cdpCaller, id *Identity, kind targetKind) error {
 }
 
 // viewportOverride 改视口用的 Emulation.setDeviceMetricsOverride 参数：带上身份的屏幕尺寸与 DPR，
-// 否则覆盖会把屏幕退回无界面默认值；身份不调整几何时不覆盖 DPR
+// 否则覆盖会把屏幕退回无界面默认值；身份不调整几何时不覆盖 DPR；手机身份保持移动端模拟与竖屏
 func viewportOverride(id *Identity, width, height int) map[string]any {
 	p := map[string]any{"width": width, "height": height, "deviceScaleFactor": 0, "mobile": false}
 	if id != nil && id.Screen.Width > 0 {
 		p["deviceScaleFactor"], p["screenWidth"], p["screenHeight"] = id.Screen.DPR, id.Screen.Width, id.Screen.Height
+		if id.Screen.Mobile {
+			p["mobile"], p["screenOrientation"] = true, portraitOrientation
+		}
 	}
 	return p
 }

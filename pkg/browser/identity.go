@@ -168,7 +168,10 @@ func geometryFor(os OSFamily, s screenSpec, platformVersion string) screenGeomet
 
 // configGeometry 账号指纹对应的屏幕与窗口几何（身份与无界面启动参数共用，保证两边一致）
 func configGeometry(cfg *FingerprintConfig) screenGeometry {
-	os := osFromUserAgent(cfg.Browser.UserAgent)
+	os := configOS(cfg)
+	if os == OSAndroid {
+		return androidGeometry(screenSpec{Width: cfg.Screen.Width, Height: cfg.Screen.Height, DPR: cfg.Screen.DevicePixelRatio})
+	}
 	spec, _ := screenSpecFor(os, cfg.Screen.Width, cfg.Screen.Height, cfg.Screen.DevicePixelRatio)
 	return geometryFor(os, spec, cfg.Browser.PlatformVersion)
 }
@@ -194,6 +197,8 @@ type Identity struct {
 	Languages           []string
 	Timezone            string
 	HardwareConcurrency int
+	DeviceMemory        int     // navigator.deviceMemory；0 表示不改写（桌面身份沿用原生值）
+	Battery             float64 // 电池电量（安卓身份）；0 表示不改写
 	Metadata            uaMetadata
 	Screen              screenGeometry
 	GPU                 *gpuProfile // nil 表示不改写 WebGL
@@ -220,6 +225,9 @@ func noiseSeed(userID string) uint32 {
 
 // identityFromConfig 由规范化后的账号指纹与真实浏览器派生身份：系统、屏幕、显卡等取自指纹，版本与品牌取自真实浏览器
 func identityFromConfig(cfg *FingerprintConfig, host hostInfo) (*Identity, error) {
+	if configOS(cfg) == OSAndroid {
+		return androidIdentity(cfg, host)
+	}
 	os := osFromUserAgent(cfg.Browser.UserAgent)
 	gpu, ok := lookupGPU(os, cfg.WebGL.Renderer)
 	if !ok {
