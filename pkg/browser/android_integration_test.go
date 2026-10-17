@@ -181,3 +181,90 @@ func TestAndroidLaunchAndViewport(t *testing.T) {
 		t.Errorf("after SetViewport %v", got)
 	}
 }
+
+// androidAPIsJS 安卓与桌面不同的 JS 接口
+const androidAPIsJS = `(async () => {
+  let notif; try { new Notification('x'); notif = 'constructs'; } catch (e) { notif = e.name + ': ' + e.message; }
+  let callNotif; try { Notification('x'); callNotif = 'ok'; } catch (e) { callNotif = e.message; }
+  const b = await navigator.getBattery();
+  const worker = await new Promise(r => {
+    const w = new Worker(URL.createObjectURL(new Blob(['postMessage([navigator.deviceMemory, navigator.platform])'], {type: 'text/javascript'})));
+    w.onmessage = e => r(e.data);
+  });
+  const out = {
+    deviceMemory: navigator.deviceMemory, worker, notif, callNotif,
+    notifPermission: typeof Notification.permission, notifSource: Function.prototype.toString.call(Notification),
+    notifProtoCtor: Notification.prototype.constructor === Notification,
+    hasContacts: 'contacts' in navigator, connType: navigator.connection.type,
+    removed: ['hid', 'windowControlsOverlay'].filter(k => k in navigator)
+      .concat(['EyeDropper', 'SharedWorker', 'documentPictureInPicture', 'queryLocalFonts', 'HID', 'FontData'].filter(k => k in window)),
+    chromeApp: 'app' in window.chrome, battery: [b.charging, b.chargingTime, b.dischargingTime, b.level],
+    share: [typeof navigator.share, typeof navigator.canShare], barcode: typeof BarcodeDetector,
+  };
+  if (out.hasContacts) {
+    out.contacts = String(navigator.contacts);
+    out.contactsProps = (await navigator.contacts.getProperties()).join();
+    try { await navigator.contacts.select(['name']); out.contactsSelect = 'resolved'; } catch (e) { out.contactsSelect = e.name; }
+    out.contactsManager = typeof ContactsManager;
+  }
+  if (typeof BarcodeDetector === 'function') out.barcodeFormats = (await BarcodeDetector.getSupportedFormats()).length > 0;
+  return JSON.stringify(out);
+})()`
+
+// TestAndroidSurfaceAPIs 安卓身份的 JS 接口与真机一致；桌面身份不受影响（Review Focus 5）
+func TestAndroidSurfaceAPIs(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, `<title>plain</title>`) }))
+	defer srv.Close()
+	run := func(t *testing.T, p Page) map[string]any {
+		if err := p.Navigate(srv.URL); err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]any{}
+		if err := json.Unmarshal([]byte(awaitJS(t, p, androidAPIsJS)), &out); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	t.Run("android", func(t *testing.T) {
+		got := run(t, connectAndroid(t, "android-apis", "PGKM10").Page())
+		want := map[string]any{
+			"deviceMemory": 8.0, "notif": "TypeError: Failed to construct 'Notification': Illegal constructor. Use ServiceWorkerRegistration.showNotification() instead.",
+			"notifPermission": "string", "notifSource": "function Notification() { [native code] }", "notifProtoCtor": true,
+			"hasContacts": true, "contacts": "[object ContactsManager]", "contactsProps": "address,email,icon,name,tel",
+			"contactsSelect": "SecurityError", "contactsManager": "function", "connType": "wifi", "chromeApp": false,
+			"barcode": "function", "barcodeFormats": true,
+		}
+		for k, v := range want {
+			if got[k] != v {
+				t.Errorf("%s = %v, want %v", k, got[k], v)
+			}
+		}
+		if w := fmt.Sprint(got["worker"]); w != "[8 Linux armv81]" {
+			t.Errorf("worker = %s", w)
+		}
+		if !strings.Contains(fmt.Sprint(got["callNotif"]), "'new' operator") {
+			t.Errorf("Notification() without new = %v", got["callNotif"])
+		}
+		if r := got["removed"].([]any); len(r) != 0 {
+			t.Errorf("desktop-only APIs still present: %v", r)
+		}
+		b := got["battery"].([]any)
+		if b[0] != false || b[1] != nil || b[2] != nil || b[3].(float64) < 0.35 || b[3].(float64) > 0.95 {
+			t.Errorf("battery = %v, want discharging with a 0.35–0.95 level (Infinity encodes as null)", b)
+		}
+		if s := fmt.Sprint(got["share"]); s != "[function function]" {
+			t.Errorf("share = %s", s)
+		}
+	})
+	t.Run("desktop", func(t *testing.T) {
+		inst, err := Connect(t.Context(), &ConnectOptions{Headless: true, FingerprintUserID: "desktop-apis", FingerprintDir: t.TempDir()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer inst.Close()
+		got := run(t, inst.Page())
+		if got["notif"] != "constructs" || len(got["removed"].([]any)) == 0 || got["chromeApp"] != true {
+			t.Errorf("desktop identity changed: notif %v, removed %v, chrome.app %v", got["notif"], got["removed"], got["chromeApp"])
+		}
+	})
+}

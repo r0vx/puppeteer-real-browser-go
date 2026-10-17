@@ -202,8 +202,15 @@ if (C.seed && G.OffscreenCanvas && G.OffscreenCanvasRenderingContext2D) {
   });
 }
 if (C.android) {
-  // 内存（页面与 Worker）
+  // 内存（页面与 Worker）、网络类型：安卓 Chrome 报告连接类型，桌面没有这个属性
   for (const N of [G.Navigator, G.WorkerNavigator]) if (N) patchGetter(N.prototype, 'deviceMemory', () => C.android.deviceMemory);
+  if (G.NetworkInformation && !('type' in NetworkInformation.prototype)) {
+    const NI = NetworkInformation.prototype;
+    const check = Object.getOwnPropertyDescriptor(NI, 'effectiveType').get;
+    const get = Object.getOwnPropertyDescriptor({get type() { Reflect.apply(check, this, []); return 'wifi'; }}, 'type').get;
+    masks.set(get, 'function get type() { [native code] }');
+    Object.defineProperty(NI, 'type', {get, enumerable: true, configurable: true});
+  }
 }
 `
 
@@ -247,8 +254,8 @@ if (C.seed && G.HTMLCanvasElement) {
   patchMethod(HTMLCanvasElement.prototype, 'toDataURL', (orig, self, args) => exportNoisy(self, orig, args));
   patchMethod(HTMLCanvasElement.prototype, 'toBlob', (orig, self, args) => exportNoisy(self, orig, args));
 }
-if (G.Navigator && G.isSecureContext && /^(Win32|MacIntel)$/.test(C.platform) && !('share' in Navigator.prototype)) {
-  // Linux 版 Chrome 没有 Web Share，Windows / Mac 版有（CreepJS 的 noWebShare）：按真实 Chrome 的行为补上
+if (G.Navigator && G.isSecureContext && /^(Win32|MacIntel|Linux armv81)$/.test(C.platform) && !('share' in Navigator.prototype)) {
+  // Linux 版 Chrome 没有 Web Share，Windows / Mac / 安卓版有（CreepJS 的 noWebShare）：按真实 Chrome 的行为补上
   const N = Navigator.prototype;
   const receiverCheck = Object.getOwnPropertyDescriptor(N, 'userAgent').get; // this 不是 Navigator 时和原生一样抛 Illegal invocation
   let allowed = G === G.top;
@@ -312,6 +319,94 @@ if (C.seed && G.AudioBuffer) {
     Reflect.apply(getChannelData, self, [args[1] | 0]);
     return Reflect.apply(orig, self, args);
   });
+}
+if (C.android) {
+  const A = C.android;
+  // 桌面独有的接口：安卓 Chrome 没有
+  for (const k of ['hid', 'windowControlsOverlay']) delete Navigator.prototype[k];
+  for (const k of ['EyeDropper', 'SharedWorker', 'documentPictureInPicture', 'queryLocalFonts', 'HID', 'HIDDevice', 'HIDConnectionEvent',
+    'HIDInputReportEvent', 'WindowControlsOverlay', 'WindowControlsOverlayGeometryChangeEvent', 'DocumentPictureInPicture',
+    'DocumentPictureInPictureEvent', 'FontData']) delete G[k];
+  if (G.chrome) delete G.chrome.app;
+  // Notification：安卓只能经 ServiceWorkerRegistration.showNotification 发通知，new 时抛错；静态成员与原型保持原生
+  if (G.Notification) {
+    const Orig = G.Notification;
+    const Fake = function Notification(title) {
+      if (new.target === undefined) return Reflect.apply(Orig, this, arguments);
+      throw new TypeError("Failed to construct 'Notification': Illegal constructor. Use ServiceWorkerRegistration.showNotification() instead.");
+    };
+    for (const [k, d] of Object.entries(Object.getOwnPropertyDescriptors(Orig))) {
+      if (k !== 'length' && k !== 'name' && k !== 'prototype') Object.defineProperty(Fake, k, d);
+    }
+    Object.defineProperty(Fake, 'prototype', {value: Orig.prototype, writable: false});
+    Object.defineProperty(Orig.prototype, 'constructor', {value: Fake, writable: true, enumerable: false, configurable: true});
+    Object.setPrototypeOf(Fake, Object.getPrototypeOf(Orig));
+    disguise(Fake, Orig);
+    Object.defineProperty(G, 'Notification', {value: Fake, writable: true, enumerable: false, configurable: true});
+  }
+  // 通讯录选择器（Contact Picker）：只在安全上下文、只有安卓有
+  if (G.isSecureContext && !('contacts' in Navigator.prototype)) {
+    const N = Navigator.prototype;
+    const receiverCheck = Object.getOwnPropertyDescriptor(N, 'userAgent').get;
+    const CM = function ContactsManager() { throw new TypeError('Illegal constructor'); };
+    masks.set(CM, 'function ContactsManager() { [native code] }');
+    const proto = CM.prototype;
+    const isManager = (self) => { if (!(self instanceof CM)) throw new TypeError('Illegal invocation'); };
+    const addProtoMethod = (name, fn) => {
+      masks.set(fn, 'function ' + name + '() { [native code] }');
+      Object.defineProperty(proto, name, {value: fn, writable: true, enumerable: true, configurable: true});
+    };
+    addProtoMethod('getProperties', {getProperties() {
+      try { isManager(this); } catch (e) { return Promise.reject(e); }
+      return Promise.resolve(['address', 'email', 'icon', 'name', 'tel']);
+    }}.getProperties);
+    // 没有用户手势时与真机一样拒绝；有手势时当作用户关掉了选择框（真机返回空列表）
+    addProtoMethod('select', {select(properties) {
+      try { isManager(this); } catch (e) { return Promise.reject(e); }
+      const activation = G.navigator.userActivation;
+      if (!(activation && activation.isActive)) {
+        return Promise.reject(new DOMException("Failed to execute 'select' on 'ContactsManager': A user gesture is required to call this method.", 'SecurityError'));
+      }
+      return new Promise((resolve) => setTimeout(() => resolve([]), 800));
+    }}.select);
+    Object.defineProperty(proto, Symbol.toStringTag, {value: 'ContactsManager', configurable: true});
+    const manager = Object.create(proto);
+    const getter = Object.getOwnPropertyDescriptor({get contacts() { Reflect.apply(receiverCheck, this, []); return manager; }}, 'contacts').get;
+    masks.set(getter, 'function get contacts() { [native code] }');
+    Object.defineProperty(N, 'contacts', {get: getter, enumerable: true, configurable: true});
+    Object.defineProperty(G, 'ContactsManager', {value: CM, writable: true, enumerable: false, configurable: true});
+  }
+  // 条码识别：安卓与 Mac 版 Chrome 有，Linux 版没有。宿主没有时补上：支持安卓的格式，识别结果为空（看不到条码）
+  if (!G.BarcodeDetector && G.isSecureContext) {
+    const formats = ['aztec', 'code_128', 'code_39', 'code_93', 'codabar', 'data_matrix', 'ean_13', 'ean_8', 'itf', 'pdf417', 'qr_code', 'upc_a', 'upc_e'];
+    const BD = function BarcodeDetector(options) {
+      if (new.target === undefined) throw new TypeError("Failed to construct 'BarcodeDetector': Please use the 'new' operator, this DOM object constructor cannot be called as a function.");
+      const wanted = options && options.formats;
+      if (wanted !== undefined && (!wanted.length || wanted.some(f => !formats.includes(f)))) {
+        throw new TypeError("Failed to construct 'BarcodeDetector': Hint option provided, but is empty or contains an unknown format.");
+      }
+    };
+    masks.set(BD, 'function BarcodeDetector() { [native code] }');
+    const getSupportedFormats = {getSupportedFormats() { return Promise.resolve(formats.slice()); }}.getSupportedFormats;
+    masks.set(getSupportedFormats, 'function getSupportedFormats() { [native code] }');
+    Object.defineProperty(BD, 'getSupportedFormats', {value: getSupportedFormats, writable: true, enumerable: true, configurable: true});
+    const detect = {detect(image) {
+      if (!(this instanceof BD)) return Promise.reject(new TypeError('Illegal invocation'));
+      return Promise.resolve([]);
+    }}.detect;
+    masks.set(detect, 'function detect() { [native code] }');
+    Object.defineProperty(BD.prototype, 'detect', {value: detect, writable: true, enumerable: true, configurable: true});
+    Object.defineProperty(BD.prototype, Symbol.toStringTag, {value: 'BarcodeDetector', configurable: true});
+    Object.defineProperty(G, 'BarcodeDetector', {value: BD, writable: true, enumerable: false, configurable: true});
+  }
+  // 电池：放电中、电量按账号固定；时间未知时为 Infinity（与真机一致）
+  if (G.BatteryManager) {
+    const B = BatteryManager.prototype;
+    patchGetter(B, 'charging', () => false);
+    patchGetter(B, 'chargingTime', () => Infinity);
+    patchGetter(B, 'dischargingTime', () => Infinity);
+    patchGetter(B, 'level', () => A.battery);
+  }
 }
 `
 
