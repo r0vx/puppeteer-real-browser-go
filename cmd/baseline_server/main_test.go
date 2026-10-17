@@ -146,6 +146,8 @@ func TestSaveResultRejects(t *testing.T) {
 		{"not json", "not json", http.StatusBadRequest},
 		{"no auto", `{"schema": 1}`, http.StatusBadRequest},
 		{"null auto", `{"schema": 1, "auto": null}`, http.StatusBadRequest},
+		// 几 KB 的深层嵌套，格式化缩进后有约 9 MB：上限要约束落盘大小，不只是请求体
+		{"amplified by indent", `{"auto": {"x": ` + strings.Repeat("[", 3000) + strings.Repeat("]", 3000) + `}}`, http.StatusRequestEntityTooLarge},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

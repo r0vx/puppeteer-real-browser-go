@@ -23,7 +23,8 @@ import (
 	"time"
 )
 
-// maxResultBytes 单份结果的大小上限
+// maxResultBytes 单份结果的大小上限；格式化（缩进）后落盘的上限是它的两倍，
+// 否则几 KB 的深层嵌套 JSON 缩进后能写出上百 MB 的文件
 const maxResultBytes = 1 << 20
 
 func main() {
@@ -132,6 +133,10 @@ func (s *server) handleResult() http.HandlerFunc {
 		var pretty bytes.Buffer
 		json.Indent(&pretty, body, "", "  ") // 上面已确认是合法 JSON，不会失败
 		pretty.WriteByte('\n')
+		if pretty.Len() > 2*maxResultBytes {
+			http.Error(w, "formatted result larger than 2 MiB", http.StatusRequestEntityTooLarge)
+			return
+		}
 
 		id := sum.Auto.Identity
 		model, brands := "", []string(nil)
