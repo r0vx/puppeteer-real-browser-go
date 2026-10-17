@@ -149,7 +149,7 @@ GPU 统一用 Mali-G610 MC6（实现者决定）。
   - `window.chrome.app`。
 - 电池：
   - `getBattery()` 的 `level` 按账号种子固定在 0.35–0.95，`charging` 为 false；
-  - `chargingTime` 为 `Infinity`，`dischargingTime` 为按电量估算的秒数。
+  - `chargingTime`、`dischargingTime` 都为 `Infinity`（时间未知；真机基准没有采集这两项，按安卓 Chrome 的常见取值）。
   - 宿主是服务器，没有电池，原生恒为"100%、在充电"，每个手机账号都一样，属于聚类特征。
 
 ### 5.4 WebGL（安卓身份）
@@ -227,6 +227,10 @@ GPU 统一用 Mali-G610 MC6（实现者决定）。
 - **系统字体的字形**：一加用的是 OPPO Sans 等厂商字体，我们用 Roboto，文字宽度可能略有不同；等宽字体用 Noto Sans Mono 而不是 Droid Sans Mono。
 - **整理来的机型**：DPR 按厂商默认显示密度推算；用户改过显示大小的真机会不同，这是正常的个体差异。
 - **TLS / HTTP2**：安卓 Chrome 与桌面 Chrome 同用 BoringSSL，握手基本一致；没有逐字节核对过。
+- **群体聚类**：所有安卓账号都是 Mali-G610 MC6、8 核、8 GB，在风控的群体统计里是同一类设备；机型、屏幕、系统版本、电量各不相同。采到更多 GPU 的真机数据后再扩充。
+- **蓝牙可用性**：`navigator.bluetooth.getAvailability()` 在服务器上为 false（没有蓝牙适配器），真机通常为 true。
+- **HEVC 解码**：真机靠硬件解码支持 H.265，宿主没有，不谎报支持（谎报会让网站推 H.265 视频而播不了）。
+- **原生取值器里的报错栈**：被替换的原生方法 / 取值器在原生抛错时，调用栈多一帧注入代码（桌面身份同样如此，已有设计）；手写的新接口（Notification、ContactsManager、BarcodeDetector）已去掉这一帧。
 
 ## 10. 不做
 

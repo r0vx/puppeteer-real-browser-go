@@ -305,6 +305,7 @@ opts := &browser.ConnectOptions{
 - 已知限制：
   - 在手机身份上调用 `Click` / `RealSendKeys` 仍是鼠标和桌面键盘事件（子项目 M2 改为触摸与输入法）；
   - WebGL 实际计算精度仍是 32 位浮点；HEVC（H.265）视频解码不报支持（宿主没有硬件解码）；
+  - 所有手机账号的 GPU、核数、内存相同（Mali-G610 MC6、8 核、8 GB），只有机型、屏幕、系统版本、电量不同；
   - 不支持高动态范围媒体查询。
   - 详见 `docs/superpowers/specs/2026-10-17-android-identity-design.md`。
 
