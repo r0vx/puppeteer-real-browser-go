@@ -229,3 +229,14 @@ func TestAndroidFontConfig(t *testing.T) {
 		}
 	}
 }
+
+// TestAddEnabledFeature 启用 Chrome 功能时合并进已有的 --enable-features（Chrome 只认最后一个同名开关），没有时新加
+func TestAddEnabledFeature(t *testing.T) {
+	got := addEnabledFeature([]string{"--a", "--enable-features=NetworkService,NetworkServiceLogging"}, "WebBluetooth")
+	if strings.Join(got, " ") != "--a --enable-features=NetworkService,NetworkServiceLogging,WebBluetooth" {
+		t.Errorf("merged %v", got)
+	}
+	if got := addEnabledFeature([]string{"--a"}, "WebBluetooth"); strings.Join(got, " ") != "--a --enable-features=WebBluetooth" {
+		t.Errorf("added %v", got)
+	}
+}

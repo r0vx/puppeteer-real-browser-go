@@ -209,3 +209,15 @@ func androidIdentity(cfg *FingerprintConfig, host hostInfo) (*Identity, error) {
 		ScriptKey: newScriptKey(),
 	}, nil
 }
+
+// addEnabledFeature 启用一个 Chrome 功能：合并进已有的 --enable-features（Chrome 只认最后一个同名开关），没有时新加
+func addEnabledFeature(flags []string, feature string) []string {
+	for i, f := range flags {
+		if strings.HasPrefix(f, "--enable-features=") {
+			out := append([]string(nil), flags...)
+			out[i] = f + "," + feature
+			return out
+		}
+	}
+	return append(flags, "--enable-features="+feature)
+}

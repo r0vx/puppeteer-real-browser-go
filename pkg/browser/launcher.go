@@ -93,6 +93,10 @@ func (cl *ChromeLauncher) Launch(ctx context.Context, opts *ConnectOptions) (*Ch
 
 	// Build Chrome flags
 	flags := append(cl.buildChromeFlags(opts, port, userDataDir), screenFlags...)
+	if mobile {
+		// 安卓 Chrome 有 Web Bluetooth；Linux 版 Chrome 默认关闭，打开后接口是原生的（Mac 版本来就有）
+		flags = addEnabledFeature(flags, "WebBluetooth")
+	}
 
 	// DEBUG: 打印实际的Chrome启动参数 (可选)
 	// fmt.Printf("🔧 Chrome启动路径: %s\n", chromePath)

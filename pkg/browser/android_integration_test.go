@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -355,5 +356,74 @@ func TestAndroidFonts(t *testing.T) {
 	desktop := collectOn(t, inst.Page(), srv)["fonts"].(map[string]any)
 	if desktop["Noto Sans CJK SC"] != true {
 		t.Error("desktop identity lost the system fonts")
+	}
+}
+
+// androidVersionGap 宿主 Chrome 与真机基准（Chrome 138）版本不同造成、无法判断真机新版本取值的项目（规格第 7 节）
+var androidVersionGap = map[string]string{
+	"engine.math.expm1": "引擎级精度差异：ARM 对 x86 或 V8 版本，无法判断",
+}
+
+// androidResidual 已知无法模拟、列为残余风险的项目（规格第 9 节）
+var androidResidual = map[string]string{
+	"media.dynamic-range":          "宿主屏幕不支持高动态范围",
+	"screen.visualViewport.height": "真机采集时地址栏状态不同",
+	// HEVC 靠手机的硬件解码器；只在接口上谎报支持，网站真推 H.265 视频时会播不了（Linux 宿主没有 HEVC 解码）
+	`avmedia.codecs.video/mp4; codecs="hev1.1.6.L93.B0"`: "HEVC 硬件解码",
+	`avmedia.codecs.video/mp4; codecs="hvc1.1.6.L93.B0"`: "HEVC 硬件解码",
+}
+
+// androidNotCompared 不属于身份、不比较的项目：版本号、用户设置、网络实时值
+var androidNotCompared = []string{
+	"identity.userAgent", "identity.userAgentData.brands", "identity.userAgentData.fullVersionList",
+	"features.connection.effectiveType", "features.connection.rtt", "features.connection.downlinkMax", "features.connection.saveData",
+	"media.prefers-color-scheme", "avmedia.voices", "avmedia.devices",
+}
+
+// diffBaseline 递归比较基准与模拟结果，返回不一致的路径；skip 为真的路径不比较
+func diffBaseline(want, got any, path string, skip func(string) bool) []string {
+	if skip(path) {
+		return nil
+	}
+	w, wok := want.(map[string]any)
+	g, gok := got.(map[string]any)
+	if wok && gok {
+		var out []string
+		for k := range w {
+			out = append(out, diffBaseline(w[k], g[k], path+"."+k, skip)...)
+		}
+		return out
+	}
+	if fmt.Sprint(want) != fmt.Sprint(got) {
+		return []string{fmt.Sprintf("%s = %v, want %v", path, got, want)}
+	}
+	return nil
+}
+
+// TestAndroidMatchesBaseline 用真机同款机型（PGKM10）跑采集页，与真机基准逐项比较；
+// 只跳过版本差、残余风险与不属于身份的项目，每一项都写明原因
+func TestAndroidMatchesBaseline(t *testing.T) {
+	srv, _ := baselineServer(t, "", http.StatusOK)
+	got := collectOn(t, connectAndroid(t, "android-baseline", "PGKM10").Page(), srv)
+	want := loadAndroidBaseline(t)
+	skip := func(path string) bool {
+		path = strings.TrimPrefix(path, ".")
+		if _, ok := androidVersionGap[path]; ok {
+			return true
+		}
+		if _, ok := androidResidual[path]; ok {
+			return true
+		}
+		for _, p := range androidNotCompared {
+			if path == p || strings.HasPrefix(path, p+".") {
+				return true
+			}
+		}
+		return path == "fonts" && runtime.GOOS != "linux" // 字体只在 Linux 上由本库控制
+	}
+	diffs := diffBaseline(want, got, "", skip)
+	sort.Strings(diffs)
+	for _, d := range diffs {
+		t.Error(d)
 	}
 }
