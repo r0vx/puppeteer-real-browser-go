@@ -141,6 +141,7 @@ type screenGeometry struct {
 	OuterWidth, OuterHeight                          int  // 浏览器窗口（最大化 = 可用区域）
 	InnerWidth, InnerHeight                          int  // 视口 = 窗口减去浏览器 UI
 	Mobile                                           bool // 手机：视口按移动端模拟（mobile: true），不调整窗口外框
+	ViewportTop                                      int  // 手机：视口顶端在屏幕上的位置（状态栏 + 地址栏），桌面为 0
 }
 
 // geometryFor 由屏幕规格推算可用区域和最大化窗口：Windows 扣任务栏（Win10 40、Win11 48 CSS 像素，随缩放等比放大，

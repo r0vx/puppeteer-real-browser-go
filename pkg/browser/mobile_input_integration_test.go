@@ -3,6 +3,7 @@ package browser
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -116,6 +117,15 @@ func TestAndroidTapAndTypeMatchBaseline(t *testing.T) {
 	if up["pressure"] != 0.0 || click["pointerType"] != "touch" {
 		t.Errorf("pointerup %v / click %v", up, click)
 	}
+	// 屏幕坐标比页面坐标多出视口上方的状态栏与地址栏（真机实测 88）
+	for _, e := range []map[string]any{down, up, click, firstOf(got, "tap", "mousedown")} {
+		if e == nil {
+			continue
+		}
+		if off := e["screenY"].(float64) - e["clientY"].(float64); math.Abs(off-88) > 1 {
+			t.Errorf("%s screenY - clientY = %v, want 88", e["type"], off)
+		}
+	}
 	if hold := up["rt"].(float64) - down["rt"].(float64); hold < 50 || hold > 150 {
 		t.Errorf("finger held %.0fms, want 50–150ms", hold)
 	}
@@ -163,6 +173,7 @@ const swipePage = `<!doctype html><meta name="viewport" content="width=device-wi
 window.__t = [];
 window.__clicks = 0;
 addEventListener('click', () => window.__clicks++, true);
+addEventListener('touchstart', e => window.__touchOff = e.touches[0].screenY - e.touches[0].clientY, {passive: true});
 for (const type of ['touchstart', 'touchmove', 'touchend', 'pointercancel'])
   addEventListener(type, e => window.__t.push({type: e.type, cancelable: e.cancelable, t: performance.now()}), {passive: true});
 </script>`
@@ -182,6 +193,9 @@ func TestAndroidSwipeScrolls(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 	if y, _ := p.Evaluate(`scrollY`); y.(float64) < 900-30 || y.(float64) > 900+30 {
 		t.Errorf("scrollY = %v after RealScroll(0, 900), want 900 ± 30", y)
+	}
+	if off, _ := p.Evaluate(`window.__touchOff`); off != 88.0 {
+		t.Errorf("Touch screenY - clientY = %v, want 88", off)
 	}
 	raw, _ := p.Evaluate(`JSON.stringify(window.__t)`)
 	var events []map[string]any

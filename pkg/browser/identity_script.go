@@ -32,6 +32,7 @@ type jsScreen struct {
 	AvailHeight int     `json:"availHeight"`
 	AvailTop    int     `json:"availTop"`
 	DPR         float64 `json:"dpr"`
+	Top         int     `json:"top,omitempty"` // 手机：视口顶端在屏幕上的位置，事件的 screenY − clientY
 }
 
 // jsWebGL 显卡标识与 getParameter 覆盖表（键为十进制 GLenum，值为数值或 [a, b]）；手机 GPU 另有只属于 WebGL2 的参数、扩展列表与着色器精度
@@ -88,7 +89,7 @@ func identityScript(id *Identity, worker bool) string {
 	cfg := jsIdentity{UserAgent: id.UserAgent, Platform: id.Platform, Languages: id.Languages, HardwareConcurrency: id.HardwareConcurrency, Seed: id.NoiseSeed, Key: key}
 	if id.Screen.Width > 0 {
 		s := id.Screen
-		cfg.Screen = &jsScreen{Width: s.Width, Height: s.Height, AvailWidth: s.AvailWidth, AvailHeight: s.AvailHeight, AvailTop: s.AvailTop, DPR: s.DPR}
+		cfg.Screen = &jsScreen{Width: s.Width, Height: s.Height, AvailWidth: s.AvailWidth, AvailHeight: s.AvailHeight, AvailTop: s.AvailTop, DPR: s.DPR, Top: s.ViewportTop}
 	}
 	if id.OS == OSAndroid {
 		cfg.Android = &jsAndroid{DeviceMemory: id.DeviceMemory, Battery: id.Battery}
@@ -353,9 +354,35 @@ if (C.screen && G.Screen) {
 }
 if (G.MouseEvent && G === G.top) {
   const uiX = () => (G.outerWidth - G.innerWidth) / 2;
-  const uiY = () => G.outerHeight - G.innerHeight - uiX();
+  // 手机的窗口外框等于视口，视口上方的状态栏与地址栏高度由身份给出
+  const uiY = () => C.screen && C.screen.top ? C.screen.top : G.outerHeight - G.innerHeight - uiX();
   patchGetter(MouseEvent.prototype, 'screenX', (orig, self) => self.isTrusted ? self.clientX + G.screenX + uiX() : Reflect.apply(orig, self, []));
   patchGetter(MouseEvent.prototype, 'screenY', (orig, self) => self.isTrusted ? self.clientY + G.screenY + uiY() : Reflect.apply(orig, self, []));
+}
+// 手机：浏览器产生的触点（Touch）的屏幕坐标同样从视口顶端算起；页面自己 new Touch() 构造的触点保持原值
+if (G.Touch && G === G.top && C.screen && C.screen.top) {
+  const made = new WeakSet();
+  const OrigTouch = G.Touch;
+  const FakeTouch = function Touch(init) {
+    try {
+      if (new.target === undefined) return Reflect.apply(OrigTouch, this, arguments);
+      const t = Reflect.construct(OrigTouch, arguments, new.target);
+      made.add(t);
+      return t;
+    } catch (e) {
+      throw strip(e, FakeTouch);
+    }
+  };
+  for (const [k, d] of Object.entries(Object.getOwnPropertyDescriptors(OrigTouch))) {
+    if (k !== 'length' && k !== 'name' && k !== 'prototype') Object.defineProperty(FakeTouch, k, d);
+  }
+  Object.defineProperty(FakeTouch, 'prototype', {value: OrigTouch.prototype, writable: false});
+  Object.defineProperty(OrigTouch.prototype, 'constructor', {value: FakeTouch, writable: true, enumerable: false, configurable: true});
+  Object.setPrototypeOf(FakeTouch, Object.getPrototypeOf(OrigTouch));
+  disguise(FakeTouch, OrigTouch);
+  Object.defineProperty(G, 'Touch', {value: FakeTouch, writable: true, enumerable: false, configurable: true});
+  patchGetter(OrigTouch.prototype, 'screenX', (orig, self) => made.has(self) ? Reflect.apply(orig, self, []) : self.clientX);
+  patchGetter(OrigTouch.prototype, 'screenY', (orig, self) => made.has(self) ? Reflect.apply(orig, self, []) : self.clientY + C.screen.top);
 }
 if (C.seed && G.HTMLCanvasElement) {
   const createElement = Document.prototype.createElement;

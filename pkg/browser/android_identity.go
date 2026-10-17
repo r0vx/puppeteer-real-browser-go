@@ -18,6 +18,8 @@ const (
 	androidPlatform = "Linux armv81"
 	// androidViewportInset 状态栏、地址栏、手势条的总高度（CSS 像素即 dp，各机型相同；真机实测 804 − 700）
 	androidViewportInset = 104
+	// androidViewportTop 视口上方的状态栏与地址栏高度：触摸、指针、鼠标事件的 screenY − clientY（真机实测 88）
+	androidViewportTop = 88
 	// androidCores 天玑 8100 / 8200 都是 8 核
 	androidCores = 8
 	// androidDeviceMemory Chrome 把 navigator.deviceMemory 封顶为 8
@@ -132,7 +134,7 @@ func androidGeometry(s screenSpec) screenGeometry {
 	inner := s.Height - androidViewportInset
 	return screenGeometry{
 		Width: s.Width, Height: s.Height, DPR: s.DPR, AvailWidth: s.Width, AvailHeight: s.Height,
-		OuterWidth: s.Width, OuterHeight: inner, InnerWidth: s.Width, InnerHeight: inner, Mobile: true,
+		OuterWidth: s.Width, OuterHeight: inner, InnerWidth: s.Width, InnerHeight: inner, Mobile: true, ViewportTop: androidViewportTop,
 	}
 }
 

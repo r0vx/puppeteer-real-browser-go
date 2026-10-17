@@ -473,6 +473,9 @@ const androidShapesJS = `(async () => {
   try { new BarcodeDetector({formats: 'qr_code'}); } catch (e) { out.bdString = e.message; }
   try { new BarcodeDetector({formats: ['nope']}); } catch (e) { out.bdUnknown = e.message; }
   try { await new BarcodeDetector().detect(); } catch (e) { out.bdDetect = e.message; }
+  out.touchCtor = new Touch({identifier: 1, target: document.body, clientY: 10, screenY: 500}).screenY;
+  out.touchSrc = Function.prototype.toString.call(Touch);
+  out.touchLength = Touch.length;
   return JSON.stringify(out);
 })()`
 
@@ -504,6 +507,7 @@ func TestAndroidFakeAPIShapes(t *testing.T) {
 		"bdString":  "Failed to construct 'BarcodeDetector': Failed to read the 'formats' property from 'BarcodeDetectorOptions': The provided value cannot be converted to a sequence.",
 		"bdUnknown": "Failed to construct 'BarcodeDetector': Failed to read the 'formats' property from 'BarcodeDetectorOptions': The provided value 'nope' is not a valid enum value of type BarcodeFormat.",
 		"bdDetect":  "Failed to execute 'detect' on 'BarcodeDetector': 1 argument required, but only 0 present.",
+		"touchCtor": 500.0, "touchSrc": "function Touch() { [native code] }", "touchLength": 1.0,
 	}
 	for k, v := range want {
 		if got[k] != v {
