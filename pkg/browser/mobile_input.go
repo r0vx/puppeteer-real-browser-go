@@ -111,9 +111,10 @@ func mobileScroll(send cdpSend, viewportW, viewportH int, deltaX, deltaY float64
 	return nil
 }
 
-// imeKey 输入法按键事件：key 为 Unidentified、code 为空、keyCode 为 229（安卓真机实测）
+// imeKey 输入法按键事件：key 为 Unidentified、code 为空、keyCode 为 229（安卓真机实测）。
+// 不带 nativeVirtualKeyCode：带上 229 后 Chrome 之后的每个 Input.dispatchTouchEvent 都收不到确认（打完字就点不了）
 func imeKey(send cdpSend, typ string) error {
-	return send("Input.dispatchKeyEvent", map[string]any{"type": typ, "key": "Unidentified", "code": "", "windowsVirtualKeyCode": 229, "nativeVirtualKeyCode": 229})
+	return send("Input.dispatchKeyEvent", map[string]any{"type": typ, "key": "Unidentified", "code": "", "windowsVirtualKeyCode": 229})
 }
 
 // enterKey 输入法上的回车：key Enter、code 为空、keyCode 13（真机实测），浏览器据此产生 keypress 与 insertLineBreak
@@ -127,7 +128,7 @@ func enterKey(send cdpSend) error {
 }
 
 // mobileType 按手机输入法的组字方式输入：每个字是 keydown（229）→ 组字更新为当前整个词 → keyup（229）；
-// 空格与换行先提交当前词。文本结束时不提交：与真机一样，组字留到失去焦点时由浏览器结束（输入框的值此时已经是 text）
+// 空格与换行先提交当前词；文本结束时提交（点按已有焦点的输入框不会结束组字，不提交的话下一次输入会把这个词替换掉）
 func mobileType(send cdpSend, text string) error {
 	var word []rune
 	commit := func() error {
@@ -181,5 +182,5 @@ func mobileType(send cdpSend, text string) error {
 			}
 		}
 	}
-	return nil
+	return commit()
 }

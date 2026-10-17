@@ -75,15 +75,15 @@ func imeKeyOK(c sentCDP, typ string) bool {
 		c.Params["code"] == "" && c.Params["windowsVirtualKeyCode"] == 229
 }
 
-// TestMobileTypeSequence 组字输入：每个字 keydown(229) → 组字为当前整个词 → keyup(229)；结束时不提交（与真机一样留到失去焦点）
+// TestMobileTypeSequence 组字输入：每个字 keydown(229) → 组字为当前整个词 → keyup(229)，最后提交整个词
 func TestMobileTypeSequence(t *testing.T) {
 	send, log := recordCDP()
 	if err := mobileType(send, "ab1"); err != nil {
 		t.Fatal(err)
 	}
 	l := *log
-	if len(l) != 9 {
-		t.Fatalf("%d commands, want 9: %v", len(l), l)
+	if len(l) != 10 {
+		t.Fatalf("%d commands, want 10: %v", len(l), l)
 	}
 	for i, want := range []string{"a", "ab", "ab1"} {
 		down, comp, up := l[i*3], l[i*3+1], l[i*3+2]
@@ -93,6 +93,9 @@ func TestMobileTypeSequence(t *testing.T) {
 		if comp.Method != "Input.imeSetComposition" || comp.Params["text"] != want || comp.Params["selectionStart"] != len(want) {
 			t.Errorf("char %d composition %v", i, comp)
 		}
+	}
+	if c := l[9]; c.Method != "Input.insertText" || c.Params["text"] != "ab1" {
+		t.Errorf("commit %v", c)
 	}
 }
 

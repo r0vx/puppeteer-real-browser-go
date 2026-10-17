@@ -131,7 +131,10 @@ func TestAndroidTapAndTypeMatchBaseline(t *testing.T) {
 				t.Errorf("%s %v, want Unidentified / \"\" / 229", e["type"], e)
 			}
 		case "compositionupdate":
-			updates = append(updates, fmt.Sprint(e["data"]))
+			// 提交组字时 Blink 会再发一次内容相同的 compositionupdate（真机按空格、选词时也一样），连续相同的只算一次
+			if d := fmt.Sprint(e["data"]); len(updates) == 0 || updates[len(updates)-1] != d {
+				updates = append(updates, d)
+			}
 		case "beforeinput":
 			if e["inputType"] != "insertCompositionText" && e["inputType"] != "insertFromComposition" && e["inputType"] != "deleteCompositionText" {
 				t.Errorf("beforeinput %v", e["inputType"])
@@ -229,5 +232,38 @@ func TestAndroidEnterKey(t *testing.T) {
 	}
 	if v, _ := p.Evaluate(`document.getElementById('i').value`); v != "x" {
 		t.Errorf("input value %v, want x", v)
+	}
+}
+
+// typeThenTapPage 两个输入框与一个按钮，记录点击
+const typeThenTapPage = `<!doctype html><meta name="viewport" content="width=device-width, initial-scale=1">
+<input id=a style="font-size: 18px"><br><input id=b style="font-size: 18px"><br><button id=go style="font-size: 18px">go</button>
+<script>window.__clicks = []; addEventListener('click', e => window.__clicks.push(e.target.id), true);</script>`
+
+// TestAndroidTypeThenTap 打字之后照样能点按、再打字（用户名、密码、登录的常见流程）；同一个框连续输入两次是追加，不丢字
+func TestAndroidTypeThenTap(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, typeThenTapPage) }))
+	defer srv.Close()
+	p := connectAndroid(t, "android-type-tap", "PGKM10").Page()
+	sp := p.(*CustomCDPPage)
+	if err := p.Navigate(srv.URL); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	for _, step := range []func() error{
+		func() error { return sp.SendKeys("#a", "ab") },
+		func() error { return sp.SendKeys("#a", "cd") },
+		func() error { return sp.SendKeys("#b", "pw") },
+		func() error { return sp.ClickSelector("#go") },
+	} {
+		if err := step(); err != nil {
+			t.Fatalf("after %v: %v", time.Since(start).Round(time.Millisecond), err)
+		}
+	}
+	if d := time.Since(start); d > 15*time.Second {
+		t.Errorf("type-then-tap flow took %v", d)
+	}
+	if v, _ := p.Evaluate(`[document.getElementById('a').value, document.getElementById('b').value, window.__clicks.join()].join('|')`); v != "abcd|pw|a,a,b,go" {
+		t.Errorf("values / clicks = %v, want abcd|pw|a,a,b,go", v)
 	}
 }
