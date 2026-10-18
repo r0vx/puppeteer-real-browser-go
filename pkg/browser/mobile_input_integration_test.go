@@ -331,3 +331,102 @@ func TestAndroidShortSwipeIsNotATap(t *testing.T) {
 		t.Errorf("clicks, scrollY = %v after RealScroll(0, 8), want no click and about 8 px", v)
 	}
 }
+
+// tinyTargetPage 一个 2×2 像素、不可点击的元素，记录每次 pointerdown 的目标（Chrome 只把触点吸附到按钮、链接这类可点击的元素上，
+// 这里落点在外面时目标就不是它）
+const tinyTargetPage = `<!doctype html><meta name="viewport" content="width=device-width, initial-scale=1">
+<span id=tiny style="position:absolute; left:100px; top:200px; width:2px; height:2px; display:block"></span>
+<script>window.__down = []; addEventListener('pointerdown', e => window.__down.push(e.target.id || e.target.tagName), true);</script>`
+
+// TestMobileTapSmallTarget 手机上点按很小的元素：手指每次都落在元素上（偏移按元素大小限制）
+func TestMobileTapSmallTarget(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, tinyTargetPage) }))
+	defer srv.Close()
+	p := connectAndroid(t, "android-tiny", "PGKM10").Page()
+	sp := p.(*CustomCDPPage)
+	if err := p.Navigate(srv.URL); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 15; i++ {
+		if err := sp.ClickSelector("#tiny"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if v, _ := p.Evaluate(`window.__down.join()`); v != strings.TrimSuffix(strings.Repeat("tiny,", 15), ",") {
+		t.Errorf("pointerdown targets %v, want tiny every time", v)
+	}
+}
+
+// directPage 密码框、数字框、要求数字键盘的文本框与普通文本框，记录组字与 beforeinput
+const directPage = `<!doctype html><meta name="viewport" content="width=device-width, initial-scale=1">
+<input id=pw type=password><input id=num type=number><input id=code inputmode=numeric><input id=txt>
+<script>
+window.__e = {};
+for (const type of ['compositionstart', 'beforeinput', 'keydown', 'keyup'])
+  addEventListener(type, e => (window.__e[e.target.id] ||= []).push(e.type + '|' + (e.inputType || e.keyCode || '')), true);
+</script>`
+
+// TestMobileTypeDirectFields 密码、数字框与 inputmode=numeric 的框里每个字直接提交（没有组字），普通文本框照常组字
+func TestMobileTypeDirectFields(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, directPage) }))
+	defer srv.Close()
+	for _, tc := range []struct {
+		name string
+		page func(t *testing.T) Page
+		up   string // 第一个字 keyup 的 keyCode
+	}{
+		{"android", func(t *testing.T) Page { return connectAndroid(t, "android-direct", "PGKM10").Page() }, "229"},
+		{"ios", func(t *testing.T) Page { return connectIOS(t, "ios-direct", "iphone-ios26").Page() }, "49"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := tc.page(t)
+			sp := p.(*CustomCDPPage)
+			if err := p.Navigate(srv.URL); err != nil {
+				t.Fatal(err)
+			}
+			for _, id := range []string{"pw", "num", "code", "txt"} {
+				if err := sp.SendKeys("#"+id, "12"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			raw, _ := p.Evaluate(`JSON.stringify([window.__e, ['pw', 'num', 'code', 'txt'].map(id => document.getElementById(id).value)])`)
+			var got []any
+			if err := json.Unmarshal([]byte(fmt.Sprint(raw)), &got); err != nil {
+				t.Fatal(err)
+			}
+			events, values := got[0].(map[string]any), fmt.Sprint(got[1])
+			if values != "[12 12 12 12]" {
+				t.Errorf("values %s, want 12 in every field", values)
+			}
+			for _, id := range []string{"pw", "num", "code"} {
+				want := "keydown|229,beforeinput|insertText,keyup|" + tc.up + ",keydown|229,beforeinput|insertText"
+				if got := fmt.Sprint(events[id]); !strings.Contains(strings.ReplaceAll(strings.Trim(got, "[]"), " ", ","), want) || strings.Contains(got, "composition") {
+					t.Errorf("%s events %s, want direct commits (%s…) and no composition", id, got, want)
+				}
+			}
+			if got := fmt.Sprint(events["txt"]); !strings.Contains(got, "compositionstart") {
+				t.Errorf("txt events %s, want composition", got)
+			}
+		})
+	}
+}
+
+// TestMobileScrollStopsAtBottom 页面已经快到底时请求滚很远：滚到底就不再拖动
+func TestMobileScrollStopsAtBottom(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, swipePage) }))
+	defer srv.Close()
+	p := connectAndroid(t, "android-bottom", "PGKM10").Page()
+	if err := p.Navigate(srv.URL); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Evaluate(`scrollTo(0, document.documentElement.scrollHeight - innerHeight - 200), window.__t = [], true`); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.(*CustomCDPPage).RealScroll(0, 3000); err != nil {
+		t.Fatal(err)
+	}
+	v, _ := p.Evaluate(`[window.__t.filter(e => e.type === 'touchstart').length, Math.round(document.documentElement.scrollHeight - innerHeight - scrollY)].join()`)
+	if v != "1,0" {
+		t.Errorf("swipes, distance left to the bottom = %v, want 1,0 (one swipe reaches the bottom, then stop)", v)
+	}
+}

@@ -26,9 +26,17 @@ func subPixel(v float64) float64 {
 	return math.Round(v*24) / 24
 }
 
-// fingerJitter 手指不会正好落在目标点：±1.5 CSS 像素以内的随机偏移
-func fingerJitter(v float64) float64 {
-	return subPixel(v + (rand.Float64()-0.5)*3)
+// fingerSlack 手指落点偏离目标点的最大距离（CSS 像素）：坐标由调用方给出、不知道元素多大时用它
+const fingerSlack = 1.5
+
+// tapSlack 点按元素时手指的最大偏移：不超过 fingerSlack，也不超过元素这一边长度的 15%（小元素上不会点到外面）
+func tapSlack(size float64) float64 {
+	return min(fingerSlack, size*0.15)
+}
+
+// fingerJitter 手指不会正好落在目标点：±slack CSS 像素以内的随机偏移
+func fingerJitter(v, slack float64) float64 {
+	return subPixel(v + (rand.Float64()*2-1)*slack)
 }
 
 // between 返回 [lo, hi) 毫秒内的随机时长
@@ -39,13 +47,21 @@ func between(lo, hi int) time.Duration {
 // iosTouchRadius iPhone 的触点半径（真机实测 12.08，pointer 宽高为它的两倍）
 const iosTouchRadius = 12.079470187425613
 
-// touchEvent Input.dispatchTouchEvent 的参数：单指触点；抬起时不带触点
+// touchEvent Input.dispatchTouchEvent 的参数：单指触点；抬起与取消时不带触点
 func touchEvent(typ string, x, y, radius, force float64) map[string]any {
 	points := []map[string]any{}
-	if typ != "touchEnd" {
+	if typ != "touchEnd" && typ != "touchCancel" {
 		points = append(points, map[string]any{"x": x, "y": y, "radiusX": radius, "radiusY": radius, "force": force, "id": 0})
 	}
 	return map[string]any{"type": typ, "touchPoints": points}
+}
+
+// liftOnError 手指按下之后的步骤出错时补发 touchCancel，返回原来的错误：否则页面以为手指一直按着，下一次点按会变成两指
+func liftOnError(send cdpSend, err error) error {
+	if err != nil {
+		send("Input.dispatchTouchEvent", touchEvent("touchCancel", 0, 0, 0, 0)) // ponytail: 尽力而为，连接已断时同样失败
+	}
+	return err
 }
 
 // finger 系统的手指触点：按下与移动时的半径、force。安卓接触面随按压变大、force 1；
@@ -59,15 +75,15 @@ func finger(os OSFamily) (down, move, force float64) {
 
 // mobileTap 一次手指点按。安卓：按下、接触面两次变大、抬起（按住约 70–130ms，真机约 90ms）；
 // 按住时手指有 1/24 像素级的抖动：位置完全不变时 Chrome 不为接触面变化生成 pointermove，真机会生成。
-// iOS：按下后直接抬起，中间没有移动（真机按住约 28ms，没有 pointermove）
-func mobileTap(send cdpSend, os OSFamily, x, y float64) error {
-	x, y = fingerJitter(x), fingerJitter(y)
+// iOS：按下后直接抬起，中间没有移动（真机按住约 28ms，没有 pointermove）。slackX / slackY 为手指落点的最大偏移（见 tapSlack）
+func mobileTap(send cdpSend, os OSFamily, x, y, slackX, slackY float64) error {
+	x, y = fingerJitter(x, slackX), fingerJitter(y, slackY)
 	if os == OSIOS {
 		if err := send("Input.dispatchTouchEvent", touchEvent("touchStart", x, y, iosTouchRadius, 0)); err != nil {
 			return err
 		}
 		time.Sleep(between(25, 60)) // 从按下被确认时起算
-		return send("Input.dispatchTouchEvent", touchEvent("touchEnd", x, y, 0, 0))
+		return liftOnError(send, send("Input.dispatchTouchEvent", touchEvent("touchEnd", x, y, 0, 0)))
 	}
 	waits := []time.Duration{between(30, 60), between(30, 50), between(18, 30)}
 	// 按绝对时间排期，起点为按下事件被浏览器确认之时（此时 pointerdown 已发出）：
@@ -79,7 +95,10 @@ func mobileTap(send cdpSend, os OSFamily, x, y float64) error {
 			typ, px = "touchStart", x
 		}
 		if err := send("Input.dispatchTouchEvent", touchEvent(typ, px, py, r, 1)); err != nil {
-			return err
+			if i == 0 {
+				return err // 按下就失败了：手指没按下
+			}
+			return liftOnError(send, err)
 		}
 		if i == 0 {
 			due = time.Now()
@@ -87,7 +106,7 @@ func mobileTap(send cdpSend, os OSFamily, x, y float64) error {
 		due = due.Add(waits[i])
 		time.Sleep(time.Until(due))
 	}
-	return send("Input.dispatchTouchEvent", touchEvent("touchEnd", x, y, 0, 0))
+	return liftOnError(send, send("Input.dispatchTouchEvent", touchEvent("touchEnd", x, y, 0, 0)))
 }
 
 // mobileSwipe 一次手指拖动：每 16ms 一个 touchMove，按先加速后减速的曲线从 (x0, y0) 移到 (x1, y1)；
@@ -119,10 +138,10 @@ func mobileSwipe(send cdpSend, os OSFamily, x0, y0, x1, y1 float64) error {
 	wg.Wait()
 	close(errs)
 	if err := <-errs; err != nil {
-		return err
+		return liftOnError(send, err)
 	}
 	time.Sleep(between(110, 160))
-	return send("Input.dispatchTouchEvent", touchEvent("touchEnd", x1, y1, 0, 0))
+	return liftOnError(send, send("Input.dispatchTouchEvent", touchEvent("touchEnd", x1, y1, 0, 0)))
 }
 
 // touchSlop 浏览器在手指移动超过这段距离（CSS 像素）之后才开始滚动，这段不计入滚动；
@@ -130,8 +149,9 @@ func mobileSwipe(send cdpSend, os OSFamily, x0, y0, x1, y1 float64) error {
 const touchSlop = 15.0
 
 // mobileScroll 用手指拖动滚动 (deltaX, deltaY)：手指方向与滚动方向相反；拆成等长的几次拖动，
-// 每次不超过视口的 60%，中间停一下。每次多拖一个 touchSlop：滚动距离接近请求值，最短的拖动也不会变成点按
-func mobileScroll(send cdpSend, os OSFamily, viewportW, viewportH int, deltaX, deltaY float64) error {
+// 每次不超过视口的 60%，中间停一下。每次多拖一个 touchSlop：滚动距离接近请求值，最短的拖动也不会变成点按。
+// room 报告手指下方 (x, y) 的滚动链能否再往 (dx, dy) 方向滚；不能时不再拖动（页面到底了真人也不会接着拖），nil 表示不检查
+func mobileScroll(send cdpSend, os OSFamily, viewportW, viewportH int, deltaX, deltaY float64, room func(x, y, dx, dy float64) bool) error {
 	if math.Abs(deltaX) < 1 && math.Abs(deltaY) < 1 {
 		return nil
 	}
@@ -145,6 +165,9 @@ func mobileScroll(send cdpSend, os OSFamily, viewportW, viewportH int, deltaX, d
 		}
 		cx := float64(viewportW)/2 + (rand.Float64()-0.5)*float64(viewportW)*0.2
 		cy := float64(viewportH)/2 + (rand.Float64()-0.5)*float64(viewportH)*0.1
+		if room != nil && !room(cx, cy, dx, dy) {
+			break
+		}
 		if err := mobileSwipe(send, os, cx+ex/2, cy+ey/2, cx-ex/2, cy-ey/2); err != nil {
 			return err
 		}
@@ -193,8 +216,9 @@ func enterKey(send cdpSend, os OSFamily) error {
 }
 
 // mobileType 按手机输入法的组字方式输入：每个字是 keydown（229）→ 组字更新为当前整个词 → keyup（229）；
-// 空格与换行（\n、\r）先提交当前词，退格在组字中缩短组字；其他控制字符报错（手机键盘没有 Tab 等键）；文本结束时提交（点按已有焦点的输入框不会结束组字，不提交的话下一次输入会把这个词替换掉）
-func mobileType(send cdpSend, os OSFamily, text string) error {
+// 空格与换行（\n、\r）先提交当前词，退格在组字中缩短组字；其他控制字符报错（手机键盘没有 Tab 等键）；文本结束时提交（点按已有焦点的输入框不会结束组字，不提交的话下一次输入会把这个词替换掉）。
+// direct 为 true 时（密码、数字、电话输入框，见 directInputJS）每个字直接提交、不组字，与空格的输入方式相同
+func mobileType(send cdpSend, os OSFamily, text string, direct bool) error {
 	var word []rune
 	commit := func() error {
 		if len(word) == 0 {
@@ -234,20 +258,18 @@ func mobileType(send cdpSend, os OSFamily, text string) error {
 			if err := commit(); err != nil {
 				return err
 			}
-			ts := imeStamp()
-			if err := imeKey(send, os, "rawKeyDown", ' ', ts); err != nil {
-				return err
-			}
-			if err := send("Input.insertText", map[string]any{"text": " "}); err != nil {
-				return err
-			}
-			time.Sleep(between(5, 10))
-			if err := imeKey(send, os, "keyUp", ' ', ts); err != nil {
+			if err := directKey(send, os, r); err != nil {
 				return err
 			}
 		default:
 			if unicode.IsControl(r) {
 				return fmt.Errorf("mobile typing does not support control character %U", r)
+			}
+			if direct {
+				if err := directKey(send, os, r); err != nil {
+					return err
+				}
+				continue
 			}
 			word = append(word, r)
 			if err := composeStep(send, os, r, word); err != nil {
@@ -256,6 +278,19 @@ func mobileType(send cdpSend, os OSFamily, text string) error {
 		}
 	}
 	return commit()
+}
+
+// directKey 不组字、直接提交的一个字：keydown → Input.insertText → keyup，按下与抬起共用时间戳（iPhone 基准里的数字与安卓的空格都是这样）
+func directKey(send cdpSend, os OSFamily, r rune) error {
+	ts := imeStamp()
+	if err := imeKey(send, os, "rawKeyDown", r, ts); err != nil {
+		return err
+	}
+	if err := send("Input.insertText", map[string]any{"text": string(r)}); err != nil {
+		return err
+	}
+	time.Sleep(between(5, 10))
+	return imeKey(send, os, "keyUp", r, ts)
 }
 
 // composeStep 一次组字改动（r 为按下的键）：keydown → 组字更新为 word（空串即取消组字）→ keyup，按下与抬起共用时间戳

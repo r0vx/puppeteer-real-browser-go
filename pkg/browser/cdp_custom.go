@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"math"
 	"math/rand"
 	"net/http"
 	"regexp"
@@ -591,7 +592,7 @@ func (p *CustomCDPPage) mobileSend() cdpSend {
 // Click 移到 (x, y) 后点击（不走拟人轨迹）；坐标对齐设备像素；手机身份为手指点按
 func (p *CustomCDPPage) Click(x, y float64) error {
 	if send := p.mobileSend(); send != nil {
-		return mobileTap(send, p.identity.OS, x, y) // 手机：手指点按（没有鼠标轨迹）
+		return mobileTap(send, p.identity.OS, x, y, fingerSlack, fingerSlack) // 手机：手指点按（没有鼠标轨迹）
 	}
 	return p.client.Click(snapPoint(p.identity, x, y))
 }
@@ -600,7 +601,7 @@ func (p *CustomCDPPage) Click(x, y float64) error {
 // 使用贝塞尔曲线进行拟人化鼠标移动后点击
 func (p *CustomCDPPage) RealClick(x, y float64) error {
 	if send := p.mobileSend(); send != nil {
-		return mobileTap(send, p.identity.OS, x, y) // 手机：手指点按（没有鼠标轨迹）
+		return mobileTap(send, p.identity.OS, x, y, fingerSlack, fingerSlack) // 手机：手指点按（没有鼠标轨迹）
 	}
 	trajectory := p.getCursor().GenerateTrajectory(x, y)
 	x, y = snapPoint(p.identity, x, y)
@@ -656,7 +657,12 @@ func (p *CustomCDPPage) RealHover(x, y float64) error {
 func (p *CustomCDPPage) RealScroll(deltaX, deltaY float64) error {
 	if send := p.mobileSend(); send != nil {
 		s := p.identity.Screen
-		return mobileScroll(send, p.identity.OS, s.InnerWidth, s.InnerHeight, deltaX, deltaY) // 手机：手指拖动
+		// 手机：手指拖动；手指下方的滚动链到头了就不再拖（查不出来时照拖）
+		room := func(x, y, dx, dy float64) bool {
+			ok, err := p.Evaluate(fmt.Sprintf(scrollRoomJS, x, y, dx, dy))
+			return err != nil || ok != false
+		}
+		return mobileScroll(send, p.identity.OS, s.InnerWidth, s.InnerHeight, deltaX, deltaY, room)
 	}
 	steps := wheelSteps(deltaX, deltaY)
 	for i, s := range steps {
@@ -707,76 +713,99 @@ func (p *CustomCDPPage) WaitForSelectorWithTimeout(selector string, timeout time
 	return fmt.Errorf("timeout waiting for selector '%s' after %v", selector, timeout)
 }
 
-// ClickSelector clicks an element by CSS selector
-func (p *CustomCDPPage) ClickSelector(selector string) error {
-	escaped := escapeJsSelector(selector)
-	// 等待元素出现
+// elementBox 等元素出现、滚动到可见后取它在视口里的中心点与宽高
+func (p *CustomCDPPage) elementBox(selector string) (x, y, w, h float64, err error) {
 	if err := p.WaitForSelector(selector); err != nil {
-		return err
+		return 0, 0, 0, 0, err
 	}
-
-	// 获取坐标并点击
 	result, err := p.Evaluate(fmt.Sprintf(`
 		(function() {
 			const elem = document.querySelector('%s');
 			if (!elem) return null;
 			elem.scrollIntoViewIfNeeded ? elem.scrollIntoViewIfNeeded() : elem.scrollIntoView({block: 'center'});
 			const rect = elem.getBoundingClientRect();
-			return {x: rect.left + rect.width/2, y: rect.top + rect.height/2};
+			return {x: rect.left + rect.width/2, y: rect.top + rect.height/2, w: rect.width, h: rect.height};
 		})()
-	`, escaped))
+	`, escapeJsSelector(selector)))
+	if err != nil {
+		return 0, 0, 0, 0, err
+	}
+	box, ok := result.(map[string]interface{})
+	if !ok || box == nil {
+		return 0, 0, 0, 0, fmt.Errorf("element not found: %s", selector)
+	}
+	x, _ = box["x"].(float64)
+	y, _ = box["y"].(float64)
+	w, _ = box["w"].(float64)
+	h, _ = box["h"].(float64)
+	return x, y, w, h, nil
+}
+
+// tapElement 手机上点按元素：手指落点的偏移按元素大小限制（见 tapSlack），小元素上不会点到外面
+func (p *CustomCDPPage) tapElement(send cdpSend, x, y, w, h float64) error {
+	return mobileTap(send, p.identity.OS, x, y, tapSlack(w), tapSlack(h))
+}
+
+// ClickSelector clicks an element by CSS selector
+func (p *CustomCDPPage) ClickSelector(selector string) error {
+	x, y, w, h, err := p.elementBox(selector)
 	if err != nil {
 		return err
 	}
-
-	coords, ok := result.(map[string]interface{})
-	if !ok || coords == nil {
-		return fmt.Errorf("element not found: %s", selector)
+	if send := p.mobileSend(); send != nil {
+		return p.tapElement(send, x, y, w, h)
 	}
-
-	x, _ := coords["x"].(float64)
-	y, _ := coords["y"].(float64)
 	return p.Click(x, y)
 }
 
 // RealClickSelector clicks an element with human-like mouse movement
+// 桌面：落点在中心附近随机偏移（不超过元素尺寸的 30%、最多 8 像素）后拟人移动点击；手机：手指点按
 func (p *CustomCDPPage) RealClickSelector(selector string) error {
-	escaped := escapeJsSelector(selector)
-	// 等待元素出现
-	if err := p.WaitForSelector(selector); err != nil {
-		return err
-	}
-
-	// 获取坐标
-	result, err := p.Evaluate(fmt.Sprintf(`
-		(function() {
-			const elem = document.querySelector('%s');
-			if (!elem) return null;
-			elem.scrollIntoViewIfNeeded ? elem.scrollIntoViewIfNeeded() : elem.scrollIntoView({block: 'center'});
-			const rect = elem.getBoundingClientRect();
-			const rx = (Math.random() - 0.5) * Math.min(rect.width * 0.3, 8);
-			const ry = (Math.random() - 0.5) * Math.min(rect.height * 0.3, 8);
-			return {x: rect.left + rect.width/2 + rx, y: rect.top + rect.height/2 + ry};
-		})()
-	`, escaped))
+	x, y, w, h, err := p.elementBox(selector)
 	if err != nil {
 		return err
 	}
-
-	coords, ok := result.(map[string]interface{})
-	if !ok || coords == nil {
-		return fmt.Errorf("element not found: %s", selector)
+	if send := p.mobileSend(); send != nil {
+		return p.tapElement(send, x, y, w, h)
 	}
-
-	x, _ := coords["x"].(float64)
-	y, _ := coords["y"].(float64)
+	x += (rand.Float64() - 0.5) * math.Min(w*0.3, 8)
+	y += (rand.Float64() - 0.5) * math.Min(h*0.3, 8)
 	return p.RealClick(x, y)
 }
 
-// RealSendKeys 向当前焦点元素逐键输入：桌面为真实按键（key / code / keyCode 齐全），手机为输入法组字，见 Type 与 mobileType
+// directInputJS 焦点所在的输入框是否不组字：密码、数字、电话框，或要求数字键盘（inputmode）的框——手机键盘在这些框里直接提交每个字
+const directInputJS = `(() => {
+  let e = document.activeElement;
+  while (e && e.shadowRoot && e.shadowRoot.activeElement) e = e.shadowRoot.activeElement;
+  if (!e) return false;
+  return (e.tagName === 'INPUT' && /^(password|number|tel)$/.test(e.type)) || /^(numeric|decimal|tel)$/.test(e.inputMode || '');
+})()`
+
+// scrollRoomJS 手指下方 (x, y) 的滚动链能否再往 (dx, dy) 方向滚：从那里的元素（穿过 shadow DOM）往上找可滚动的祖先，
+// 直到文档的滚动元素；落在 iframe 上时看不到里面的滚动，按能滚处理
+const scrollRoomJS = `((x, y, dx, dy) => {
+  let e = document.elementFromPoint(x, y);
+  while (e && e.shadowRoot) {
+    const inner = e.shadowRoot.elementFromPoint(x, y);
+    if (!inner || inner === e) break;
+    e = inner;
+  }
+  const root = document.scrollingElement || document.documentElement;
+  for (; e; e = e.parentElement || (e.parentNode && e.parentNode.host) || null) {
+    if (e.tagName === 'IFRAME' || e.tagName === 'FRAME') return true;
+    const s = getComputedStyle(e);
+    const can = (overflow) => e === root || /^(auto|scroll|overlay)$/.test(overflow);
+    if (dy && can(s.overflowY) && (dy > 0 ? e.scrollHeight - e.clientHeight - e.scrollTop : e.scrollTop) > 0.5) return true;
+    if (dx && can(s.overflowX) && (dx > 0 ? e.scrollWidth - e.clientWidth - e.scrollLeft : e.scrollLeft) > 0.5) return true;
+  }
+  return false;
+})(%g, %g, %g, %g)`
+
+// RealSendKeys 向当前焦点元素逐键输入：桌面为真实按键（key / code / keyCode 齐全），手机为输入法组字（密码、数字框里直接提交），见 Type 与 mobileType
 func (p *CustomCDPPage) RealSendKeys(text string) error {
 	if send := p.mobileSend(); send != nil {
-		return mobileType(send, p.identity.OS, text)
+		direct, _ := p.Evaluate(directInputJS) // 查不出来时按普通输入框组字
+		return mobileType(send, p.identity.OS, text, direct == true)
 	}
 	return p.client.Type(text)
 }
